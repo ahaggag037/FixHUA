@@ -107,10 +107,7 @@ jobs:
             sleep 4
             adb shell pidof com.fixhua.guard | grep -Eq '[0-9]+'
             adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.MainActivity"
-            if adb logcat -d -s AndroidRuntime:E | grep -F "Process: com.fixhua.guard"; then
-              echo "FixHUA crashed during Android 12 smoke test"
-              exit 1
-            fi
+            test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.fixhua.guard' || true)"
 
       - uses: actions/upload-artifact@v4
         with:
