@@ -52,7 +52,7 @@ public class MonitorService extends Service {
 
         executor = Executors.newSingleThreadScheduledExecutor();
         executor.scheduleAtFixedRate(() -> appendSample(log), 0, 5, TimeUnit.SECONDS);
-        executor.schedule(this::stopSelf, 5, TimeUnit.MINUTES);
+        executor.schedule((Runnable) this::stopSelf, 5, TimeUnit.MINUTES);
         return START_NOT_STICKY;
     }
 
