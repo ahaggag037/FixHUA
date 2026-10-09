@@ -7,7 +7,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.fixhua.diagnostics"
+        applicationId = "com.fixhua.guard"
         minSdk = 29
         targetSdk = 35
         versionCode = 10
