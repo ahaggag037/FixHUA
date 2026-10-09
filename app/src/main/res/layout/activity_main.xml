@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp"
+        android:layoutDirection="rtl">
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="FixHUA 2"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="Compatibility &amp; Stability Manager"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/summary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:padding="14dp"
+            android:text="جاري الفحص…"
+            android:textIsSelectable="true"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/checkNow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="52dp"
+            android:text="فحص الجهاز الآن"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/fixNext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="إصلاح أهم مشكلة"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/launchGbox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="فحص ثم تشغيل GBox"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/recoveryCenter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="مركز إصلاح GBox"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/huaweiSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="إعدادات Huawei للعمل في الخلفية"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/batterySettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="إعدادات تحسين البطارية"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/gboxInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="معلومات تطبيق GBox"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/shareReport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="مشاركة التقرير"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:id="@+id/findings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text=""
+            android:textIsSelectable="true"
+            android:textSize="15sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:paddingBottom="24dp"
+            android:text="ملاحظة: FixHUA لا يغيّر هوية الجهاز ولا يتجاوز فحوص الأمان، ولا يعتبر غياب Google Services Framework على النظام المضيف خطأً بحد ذاته عند استخدام GBox."
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>
