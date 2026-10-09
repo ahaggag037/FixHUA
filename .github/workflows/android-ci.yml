@@ -3,12 +3,10 @@ name: FixHUA Android CI
 on:
   push:
     branches: [ main, 'build/**' ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
