@@ -2,11 +2,16 @@ package com.fixhua.diagnostics;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -14,159 +19,267 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-
 public class MainActivity extends Activity {
-    private TextView reportView;
-    private String snapshot = "";
+    private static final String GBOX_PACKAGE = "com.gbox.android";
+
+    private TextView statusView;
+    private Button turboButton;
+    private Button stopButton;
+    private Button protectionButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 42);
         }
         setContentView(buildUi());
-        runSnapshot();
+        refreshStatus();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (statusView != null) refreshStatus();
     }
 
     private View buildUi() {
-        int pad = dp(16);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
+        int pad = dp(18);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(pad, pad, pad, dp(28));
 
         TextView title = new TextView(this);
-        title.setText("FixHUA Diagnostics v0.1");
-        title.setTextSize(24);
+        title.setText("FixHUA Turbo v1.0");
+        title.setTextSize(27);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(title);
+        content.addView(title);
 
-        TextView privacy = new TextView(this);
-        privacy.setText("Read-only diagnostic build. It does not collect accounts, contacts, messages, photos, location, Android ID, serial number, or IP address. Nothing is uploaded automatically.");
-        privacy.setPadding(0, dp(8), 0, dp(12));
-        root.addView(privacy);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Host-side stability mode for Huawei + GBox");
+        subtitle.setTextSize(16);
+        subtitle.setPadding(0, dp(4), 0, dp(14));
+        content.addView(subtitle);
 
-        Button scan = button("Run fresh snapshot");
-        scan.setOnClickListener(v -> runSnapshot());
-        root.addView(scan);
+        TextView explanation = new TextView(this);
+        explanation.setText(
+                "Turbo is a real runtime guard, not a RAM cleaner. While active it keeps the CPU awake, " +
+                "requests Android's high-performance Wi-Fi mode, maintains a foreground guard and " +
+                "re-acquires the locks if Huawei releases them. Use it before opening GBox."
+        );
+        explanation.setTextSize(14);
+        explanation.setPadding(dp(12), dp(12), dp(12), dp(12));
+        content.addView(explanation);
 
-        Button monitor = button("Start 5-minute monitor & open GBox");
-        monitor.setOnClickListener(v -> startMonitorAndGBox());
-        root.addView(monitor);
+        statusView = new TextView(this);
+        statusView.setTypeface(Typeface.MONOSPACE);
+        statusView.setTextSize(14);
+        statusView.setPadding(dp(12), dp(14), dp(12), dp(14));
+        content.addView(statusView);
 
-        Button stop = button("Stop monitor");
-        stop.setOnClickListener(v -> stopMonitor());
-        root.addView(stop);
+        turboButton = button("START TURBO & OPEN GBOX");
+        turboButton.setOnClickListener(v -> startTurboAndOpenGBox());
+        content.addView(turboButton);
 
-        Button load = button("Load session monitor log");
-        load.setOnClickListener(v -> showCombinedReport());
-        root.addView(load);
+        stopButton = button("Stop Turbo");
+        stopButton.setOnClickListener(v -> stopTurbo());
+        content.addView(stopButton);
 
-        Button share = button("Share report with ChatGPT / another app");
-        share.setOnClickListener(v -> shareReport());
-        root.addView(share);
+        protectionButton = button("Protect FixHUA from battery optimization");
+        protectionButton.setOnClickListener(v -> requestFixhuaProtection());
+        content.addView(protectionButton);
+
+        Button huaweiLaunch = button("Open Huawei background / app-launch settings");
+        huaweiLaunch.setOnClickListener(v -> openHuaweiStartupManager());
+        content.addView(huaweiLaunch);
+
+        Button openGBox = button("Open GBox without Turbo");
+        openGBox.setOnClickListener(v -> launchGBox());
+        content.addView(openGBox);
+
+        TextView note = new TextView(this);
+        note.setText(
+                "Recommended one-time setup: protect FixHUA from battery optimization and allow it to run in the background in Huawei settings. " +
+                "Your GBox package is already power-whitelisted on the device report you supplied.\n\n" +
+                "Turbo deliberately trades extra battery use for a more stable active GBox session. Stop it from this screen or the persistent notification when you finish."
+        );
+        note.setTextSize(13);
+        note.setPadding(dp(4), dp(12), dp(4), 0);
+        content.addView(note);
 
         ScrollView scroll = new ScrollView(this);
-        reportView = new TextView(this);
-        reportView.setTextSize(12);
-        reportView.setTypeface(Typeface.MONOSPACE);
-        reportView.setTextIsSelectable(true);
-        reportView.setPadding(0, dp(12), 0, dp(24));
-        scroll.addView(reportView);
-        root.addView(scroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-        ));
-        return root;
+        scroll.addView(content);
+        return scroll;
     }
 
     private Button button(String text) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(52));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        lp.bottomMargin = dp(6);
-        b.setLayoutParams(lp);
-        return b;
+        params.bottomMargin = dp(8);
+        button.setLayoutParams(params);
+        return button;
     }
 
-    private void runSnapshot() {
-        reportView.setText("Collecting…");
-        new Thread(() -> {
-            String result = DiagnosticCollector.collect(this);
-            runOnUiThread(() -> {
-                snapshot = result;
-                reportView.setText(result);
-            });
-        }).start();
-    }
+    private void startTurboAndOpenGBox() {
+        if (!isPackageInstalled(GBOX_PACKAGE)) {
+            Toast.makeText(this, "GBox is not installed on the host system.", Toast.LENGTH_LONG).show();
+            return;
+        }
 
-    private void startMonitorAndGBox() {
-        Intent service = new Intent(this, MonitorService.class);
-        startForegroundService(service);
-        Toast.makeText(this, "Monitoring started for up to 5 minutes", Toast.LENGTH_SHORT).show();
-
-        reportView.postDelayed(() -> {
-            Intent launch = getPackageManager().getLaunchIntentForPackage("com.gbox.android");
-            if (launch != null) {
-                try {
-                    startActivity(launch);
-                } catch (Throwable t) {
-                    Toast.makeText(this, "GBox launch failed: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
-                }
+        Intent turbo = new Intent(this, TurboService.class);
+        turbo.setAction(TurboService.ACTION_START);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(turbo);
             } else {
-                Toast.makeText(this, "GBox package com.gbox.android was not found. Monitor is still running.", Toast.LENGTH_LONG).show();
+                startService(turbo);
             }
-        }, 700);
-    }
-
-    private void stopMonitor() {
-        Intent stop = new Intent(this, MonitorService.class);
-        stop.setAction(MonitorService.ACTION_STOP);
-        startService(stop);
-        Toast.makeText(this, "Monitor stop requested", Toast.LENGTH_SHORT).show();
-    }
-
-    private void showCombinedReport() {
-        String combined = combinedReport();
-        reportView.setText(combined);
-    }
-
-    private void shareReport() {
-        String combined = combinedReport();
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "FixHUA diagnostic report");
-        send.putExtra(Intent.EXTRA_TEXT, combined);
-        startActivity(Intent.createChooser(send, "Share FixHUA report"));
-    }
-
-    private String combinedReport() {
-        if (snapshot.isEmpty()) {
-            snapshot = DiagnosticCollector.collect(this);
+        } catch (Throwable t) {
+            Toast.makeText(this, "Unable to start Turbo: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+            return;
         }
-        String log = readMonitorLog();
-        return snapshot + "\n\n=== GBOX SESSION MONITOR ===\n" + log;
+
+        Toast.makeText(this, "FixHUA Turbo active", Toast.LENGTH_SHORT).show();
+        statusView.postDelayed(() -> {
+            refreshStatus();
+            launchGBox();
+        }, 450);
     }
 
-    private String readMonitorLog() {
-        File f = new File(getFilesDir(), MonitorService.FILE_NAME);
-        if (!f.isFile()) return "No monitoring session has been recorded yet.\n";
-        StringBuilder b = new StringBuilder();
-        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
-            String line;
-            while ((line = r.readLine()) != null) b.append(line).append('\n');
-        } catch (Exception e) {
-            return "Unable to read monitor log: " + e.getClass().getSimpleName() + "\n";
+    private void stopTurbo() {
+        try {
+            Intent stop = new Intent(this, TurboService.class);
+            stop.setAction(TurboService.ACTION_STOP);
+            startService(stop);
+            stopService(new Intent(this, TurboService.class));
+        } catch (Throwable ignored) {
         }
-        return b.toString();
+        statusView.postDelayed(this::refreshStatus, 250);
+        Toast.makeText(this, "Turbo stopped", Toast.LENGTH_SHORT).show();
+    }
+
+    private void launchGBox() {
+        Intent launch = getPackageManager().getLaunchIntentForPackage(GBOX_PACKAGE);
+        if (launch == null) {
+            Toast.makeText(this, "GBox launch activity was not found.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(launch);
+        } catch (Throwable t) {
+            Toast.makeText(this, "GBox launch failed: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void requestFixhuaProtection() {
+        if (isIgnoringBatteryOptimizations(getPackageName())) {
+            Toast.makeText(this, "FixHUA is already excluded from battery optimization.", Toast.LENGTH_LONG).show();
+            refreshStatus();
+            return;
+        }
+
+        Intent request = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+        request.setData(Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(request);
+        } catch (Throwable ignored) {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Throwable t) {
+                openOwnAppDetails();
+            }
+        }
+    }
+
+    private void openHuaweiStartupManager() {
+        String[][] components = new String[][]{
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"}
+        };
+
+        for (String[] component : components) {
+            try {
+                Intent intent = new Intent();
+                intent.setComponent(new ComponentName(component[0], component[1]));
+                startActivity(intent);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+
+        Toast.makeText(this, "Huawei manager screen is protected on this ROM; opening FixHUA app settings instead.", Toast.LENGTH_LONG).show();
+        openOwnAppDetails();
+    }
+
+    private void openOwnAppDetails() {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        intent.setData(Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(intent);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void refreshStatus() {
+        boolean gboxInstalled = isPackageInstalled(GBOX_PACKAGE);
+        boolean gboxProtected = isIgnoringBatteryOptimizations(GBOX_PACKAGE);
+        boolean fixhuaProtected = isIgnoringBatteryOptimizations(getPackageName());
+        boolean turbo = TurboService.isRunning();
+
+        StringBuilder status = new StringBuilder();
+        status.append("DEVICE       : ")
+                .append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n');
+        status.append("ANDROID      : ").append(Build.VERSION.RELEASE)
+                .append(" (SDK ").append(Build.VERSION.SDK_INT).append(")\n");
+        status.append("GBOX         : ")
+                .append(gboxInstalled ? "installed " + packageVersion(GBOX_PACKAGE) : "not installed")
+                .append('\n');
+        status.append("GBOX POWER   : ").append(gboxProtected ? "protected" : "not protected").append('\n');
+        status.append("FIXHUA POWER : ").append(fixhuaProtected ? "protected" : "needs one-time protection").append('\n');
+        status.append("TURBO        : ").append(turbo ? "ACTIVE" : "stopped");
+
+        statusView.setText(status.toString());
+
+        if (turboButton != null) turboButton.setEnabled(gboxInstalled && !turbo);
+        if (stopButton != null) stopButton.setEnabled(turbo);
+        if (protectionButton != null) protectionButton.setEnabled(!fixhuaProtected);
+    }
+
+    private boolean isPackageInstalled(String packageName) {
+        try {
+            getPackageManager().getPackageInfo(packageName, 0);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private String packageVersion(String packageName) {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(packageName, 0);
+            return info.versionName == null ? "" : info.versionName;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private boolean isIgnoringBatteryOptimizations(String packageName) {
+        try {
+            PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
+            return manager != null && manager.isIgnoringBatteryOptimizations(packageName);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private int dp(int value) {
