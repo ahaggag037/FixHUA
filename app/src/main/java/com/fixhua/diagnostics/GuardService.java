@@ -20,6 +20,8 @@ import android.os.PowerManager;
 public class GuardService extends Service {
     public static final String ACTION_STOP = "com.fixhua.diagnostics.GUARD_STOP";
     public static final String ACTION_STARTED = "com.fixhua.diagnostics.GUARD_STARTED";
+    public static volatile boolean active = false;
+
     private static final String CHANNEL_ID = "fixhua_guard";
     private static final int NOTIFICATION_ID = 7301;
     private static final long MAX_SESSION_MS = 2L * 60L * 60L * 1000L;
@@ -31,6 +33,7 @@ public class GuardService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        active = true;
         createChannel();
         startForeground(NOTIFICATION_ID, buildNotification("FixHUA protection is active"));
         acquireSessionLocks();
@@ -87,7 +90,7 @@ public class GuardService extends Service {
         if (nm != null) {
             String text = isValidatedWifi()
                     ? "CPU + high-performance Wi-Fi guard active"
-                    : "CPU guard active; current network is not validated Wi-Fi";
+                    : "CPU guard active";
             nm.notify(NOTIFICATION_ID, buildNotification(text));
         }
     }
@@ -143,6 +146,7 @@ public class GuardService extends Service {
 
     @Override
     public void onDestroy() {
+        active = false;
         handler.removeCallbacksAndMessages(null);
         try {
             if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
