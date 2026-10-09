@@ -100,16 +100,14 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            APK=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
-            adb install -r "$APK"
+            adb install -r app/build/outputs/apk/release/FixHUA-v2.0.0.apk
             adb logcat -c
             adb shell am force-stop com.fixhua.guard
             adb shell am start -W -n com.fixhua.guard/.MainActivity | tee app/build/outputs/apk/release/smoke-start.txt
             sleep 4
-            PID=$(adb shell pidof com.fixhua.guard | tr -d '\r')
-            test -n "$PID"
-            adb shell dumpsys activity activities | grep -q "com.fixhua.guard/.MainActivity"
-            if adb logcat -d | grep -E "FATAL EXCEPTION|Process: com.fixhua.guard"; then
+            adb shell pidof com.fixhua.guard | grep -Eq '[0-9]+'
+            adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.MainActivity"
+            if adb logcat -d -s AndroidRuntime:E | grep -F "Process: com.fixhua.guard"; then
               echo "FixHUA crashed during Android 12 smoke test"
               exit 1
             fi
