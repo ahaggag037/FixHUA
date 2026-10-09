@@ -3,15 +3,15 @@ plugins {
 }
 
 android {
-    namespace = "com.fixhua.diagnostics"
+    namespace = "com.fixhua.guard"
     compileSdk = 35
 
     defaultConfig {
         applicationId = "com.fixhua.guard"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.1.0"
+        versionCode = 20
+        versionName = "2.0.0"
     }
 
     buildTypes {
@@ -25,4 +25,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
 }
