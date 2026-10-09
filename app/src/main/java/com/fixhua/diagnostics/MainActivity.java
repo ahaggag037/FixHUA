@@ -2,11 +2,19 @@ package com.fixhua.diagnostics;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
+import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -14,73 +22,98 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-
 public class MainActivity extends Activity {
-    private TextView reportView;
-    private String snapshot = "";
+    private static final String GBOX = "com.gbox.android";
+    private static final String MICROG = "com.google.android.gms";
+    private static final String PLAY_STORE = "com.android.vending";
+
+    private TextView statusView;
+    private TextView detailsView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 42);
         }
         setContentView(buildUi());
-        runSnapshot();
+        refreshStatus();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (statusView != null) refreshStatus();
     }
 
     private View buildUi() {
-        int pad = dp(16);
+        int pad = dp(18);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(pad, pad, pad, pad);
+        root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         TextView title = new TextView(this);
-        title.setText("FixHUA Diagnostics v0.1");
-        title.setTextSize(24);
+        title.setText("FixHUA Guard v1.0");
+        title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
         root.addView(title);
 
-        TextView privacy = new TextView(this);
-        privacy.setText("Read-only diagnostic build. It does not collect accounts, contacts, messages, photos, location, Android ID, serial number, or IP address. Nothing is uploaded automatically.");
-        privacy.setPadding(0, dp(8), 0, dp(12));
-        root.addView(privacy);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("حماية تشغيل GBox وتقليل التعليق الناتج عن النوم الخلفي وطاقة Wi‑Fi وحالات التشغيل العالقة. يعمل بدون Root.");
+        subtitle.setTextSize(15);
+        subtitle.setPadding(0, dp(8), 0, dp(14));
+        root.addView(subtitle);
 
-        Button scan = button("Run fresh snapshot");
-        scan.setOnClickListener(v -> runSnapshot());
-        root.addView(scan);
+        statusView = new TextView(this);
+        statusView.setTextSize(15);
+        statusView.setTypeface(Typeface.MONOSPACE);
+        statusView.setPadding(dp(12), dp(12), dp(12), dp(12));
+        root.addView(statusView);
 
-        Button monitor = button("Start 5-minute monitor & open GBox");
-        monitor.setOnClickListener(v -> startMonitorAndGBox());
-        root.addView(monitor);
+        Button protect = button("تشغيل GBox بحماية FixHUA");
+        protect.setOnClickListener(v -> startProtected(false));
+        root.addView(protect);
 
-        Button stop = button("Stop monitor");
-        stop.setOnClickListener(v -> stopMonitor());
+        Button repair = button("إصلاح تشغيل عالق ثم فتح GBox");
+        repair.setOnClickListener(v -> startProtected(true));
+        root.addView(repair);
+
+        Button stability = button("إعداد الاستقرار مرة واحدة");
+        stability.setOnClickListener(v -> openHuaweiStartupManager());
+        root.addView(stability);
+
+        Button selfBattery = button("السماح لـ FixHUA بالعمل دون تقييد البطارية");
+        selfBattery.setOnClickListener(v -> requestOwnBatteryExemption());
+        root.addView(selfBattery);
+
+        Button stop = button("إيقاف حماية FixHUA");
+        stop.setOnClickListener(v -> stopGuard());
         root.addView(stop);
 
-        Button load = button("Load session monitor log");
-        load.setOnClickListener(v -> showCombinedReport());
-        root.addView(load);
+        Button refresh = button("تحديث حالة التوافق");
+        refresh.setOnClickListener(v -> refreshStatus());
+        root.addView(refresh);
 
-        Button share = button("Share report with ChatGPT / another app");
-        share.setOnClickListener(v -> shareReport());
-        root.addView(share);
+        Button report = button("عرض التقرير التقني");
+        report.setOnClickListener(v -> loadTechnicalReport());
+        root.addView(report);
 
         ScrollView scroll = new ScrollView(this);
-        reportView = new TextView(this);
-        reportView.setTextSize(12);
-        reportView.setTypeface(Typeface.MONOSPACE);
-        reportView.setTextIsSelectable(true);
-        reportView.setPadding(0, dp(12), 0, dp(24));
-        scroll.addView(reportView);
+        detailsView = new TextView(this);
+        detailsView.setTextSize(12);
+        detailsView.setTypeface(Typeface.MONOSPACE);
+        detailsView.setTextIsSelectable(true);
+        detailsView.setPadding(0, dp(12), 0, dp(30));
+        scroll.addView(detailsView);
         root.addView(scroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
         ));
+
         return root;
     }
 
@@ -88,85 +121,164 @@ public class MainActivity extends Activity {
         Button b = new Button(this);
         b.setText(text);
         b.setAllCaps(false);
+        b.setTextSize(16);
+        b.setMinHeight(dp(50));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        lp.bottomMargin = dp(6);
+        lp.bottomMargin = dp(7);
         b.setLayoutParams(lp);
         return b;
     }
 
-    private void runSnapshot() {
-        reportView.setText("Collecting…");
-        new Thread(() -> {
-            String result = DiagnosticCollector.collect(this);
-            runOnUiThread(() -> {
-                snapshot = result;
-                reportView.setText(result);
-            });
-        }).start();
-    }
-
-    private void startMonitorAndGBox() {
-        Intent service = new Intent(this, MonitorService.class);
-        startForegroundService(service);
-        Toast.makeText(this, "Monitoring started for up to 5 minutes", Toast.LENGTH_SHORT).show();
-
-        reportView.postDelayed(() -> {
-            Intent launch = getPackageManager().getLaunchIntentForPackage("com.gbox.android");
-            if (launch != null) {
-                try {
-                    startActivity(launch);
-                } catch (Throwable t) {
-                    Toast.makeText(this, "GBox launch failed: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
-                }
-            } else {
-                Toast.makeText(this, "GBox package com.gbox.android was not found. Monitor is still running.", Toast.LENGTH_LONG).show();
-            }
-        }, 700);
-    }
-
-    private void stopMonitor() {
-        Intent stop = new Intent(this, MonitorService.class);
-        stop.setAction(MonitorService.ACTION_STOP);
-        startService(stop);
-        Toast.makeText(this, "Monitor stop requested", Toast.LENGTH_SHORT).show();
-    }
-
-    private void showCombinedReport() {
-        String combined = combinedReport();
-        reportView.setText(combined);
-    }
-
-    private void shareReport() {
-        String combined = combinedReport();
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "FixHUA diagnostic report");
-        send.putExtra(Intent.EXTRA_TEXT, combined);
-        startActivity(Intent.createChooser(send, "Share FixHUA report"));
-    }
-
-    private String combinedReport() {
-        if (snapshot.isEmpty()) {
-            snapshot = DiagnosticCollector.collect(this);
-        }
-        String log = readMonitorLog();
-        return snapshot + "\n\n=== GBOX SESSION MONITOR ===\n" + log;
-    }
-
-    private String readMonitorLog() {
-        File f = new File(getFilesDir(), MonitorService.FILE_NAME);
-        if (!f.isFile()) return "No monitoring session has been recorded yet.\n";
+    private void refreshStatus() {
         StringBuilder b = new StringBuilder();
-        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
-            String line;
-            while ((line = r.readLine()) != null) b.append(line).append('\n');
-        } catch (Exception e) {
-            return "Unable to read monitor log: " + e.getClass().getSimpleName() + "\n";
+        b.append("الحماية: ").append(GuardService.active ? "مفعلة" : "متوقفة").append('\n');
+        b.append("GBox: ").append(packageSummary(GBOX)).append('\n');
+        b.append("microG: ").append(packageSummary(MICROG)).append('\n');
+        b.append("Play Store: ").append(packageSummary(PLAY_STORE)).append('\n');
+        b.append("\nقيود البطارية:\n");
+        b.append("• GBox: ").append(ignoreState(GBOX)).append('\n');
+        b.append("• microG: ").append(ignoreState(MICROG)).append('\n');
+        b.append("• Play Store: ").append(ignoreState(PLAY_STORE)).append('\n');
+        b.append("• FixHUA: ").append(ignoreState(getPackageName())).append('\n');
+        statusView.setText(b.toString());
+    }
+
+    private String packageSummary(String pkg) {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(pkg, 0);
+            String version = info.versionName == null ? "?" : info.versionName;
+            return "موجود — " + version;
+        } catch (PackageManager.NameNotFoundException e) {
+            return "غير موجود";
         }
-        return b.toString();
+    }
+
+    private String ignoreState(String pkg) {
+        if (!isInstalled(pkg) && !pkg.equals(getPackageName())) return "غير مثبت";
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            return pm.isIgnoringBatteryOptimizations(pkg) ? "غير مقيد ✓" : "مقيد ⚠";
+        } catch (Throwable t) {
+            return "غير معروف";
+        }
+    }
+
+    private boolean isInstalled(String pkg) {
+        try {
+            getPackageManager().getPackageInfo(pkg, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    private void startProtected(boolean cleanFirst) {
+        if (!isInstalled(GBOX)) {
+            Toast.makeText(this, "GBox غير مثبت على الهاتف", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if (cleanFirst) {
+            try {
+                ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                am.killBackgroundProcesses(GBOX);
+            } catch (Throwable ignored) {
+            }
+        }
+
+        try {
+            startForegroundService(new Intent(this, GuardService.class));
+        } catch (Throwable t) {
+            Toast.makeText(this, "تعذر بدء الحماية: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+        }
+
+        statusView.postDelayed(() -> {
+            Intent launch = getPackageManager().getLaunchIntentForPackage(GBOX);
+            if (launch == null) {
+                Toast.makeText(this, "تعذر العثور على واجهة تشغيل GBox", Toast.LENGTH_LONG).show();
+                return;
+            }
+            try {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                startActivity(launch);
+            } catch (Throwable t) {
+                Toast.makeText(this, "فشل فتح GBox: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+            }
+        }, cleanFirst ? 900 : 350);
+    }
+
+    private void stopGuard() {
+        Intent stop = new Intent(this, GuardService.class).setAction(GuardService.ACTION_STOP);
+        try {
+            startService(stop);
+        } catch (Throwable ignored) {
+            stopService(new Intent(this, GuardService.class));
+        }
+        Toast.makeText(this, "تم طلب إيقاف الحماية", Toast.LENGTH_SHORT).show();
+        statusView.postDelayed(this::refreshStatus, 500);
+    }
+
+    private void requestOwnBatteryExemption() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                Toast.makeText(this, "FixHUA بالفعل غير مقيد بالبطارية", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Throwable t) {
+            openBatteryOptimizationList();
+        }
+    }
+
+    private void openHuaweiStartupManager() {
+        String[][] targets = new String[][]{
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.power.ui.HwPowerManagerActivity"}
+        };
+        for (String[] target : targets) {
+            try {
+                Intent i = new Intent();
+                i.setComponent(new ComponentName(target[0], target[1]));
+                startActivity(i);
+                Toast.makeText(this, "اجعل GBox وmicroG وFixHUA مسموحًا لها بالعمل في الخلفية", Toast.LENGTH_LONG).show();
+                return;
+            } catch (ActivityNotFoundException ignored) {
+            } catch (Throwable ignored) {
+            }
+        }
+        openBatteryOptimizationList();
+    }
+
+    private void openBatteryOptimizationList() {
+        try {
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        } catch (Throwable t) {
+            openGBoxAppInfo();
+        }
+    }
+
+    private void openGBoxAppInfo() {
+        try {
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            i.setData(Uri.parse("package:" + GBOX));
+            startActivity(i);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void loadTechnicalReport() {
+        detailsView.setText("جاري جمع التقرير…");
+        new Thread(() -> {
+            String report = DiagnosticCollector.collect(this);
+            runOnUiThread(() -> detailsView.setText(report));
+        }).start();
     }
 
     private int dp(int value) {

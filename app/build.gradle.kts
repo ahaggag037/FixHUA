@@ -7,11 +7,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.fixhua.diagnostics"
+        applicationId = "com.fixhua.guard"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 10
+        versionName = "1.0.0"
     }
 
     buildTypes {
