@@ -229,41 +229,11 @@ public class GuardService extends Service {
     }
 
     private String currentForegroundPackage() {
-        try {
-            UsageStatsManager usm = (UsageStatsManager) getSystemService(USAGE_STATS_SERVICE);
-            long end = System.currentTimeMillis();
-            UsageEvents events = usm.queryEvents(end - 30_000L, end);
-            UsageEvents.Event event = new UsageEvents.Event();
-            String latest = null;
-            long latestTime = 0L;
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event);
-                int type = event.getEventType();
-                if ((type == UsageEvents.Event.ACTIVITY_RESUMED
-                        || type == UsageEvents.Event.MOVE_TO_FOREGROUND)
-                        && event.getTimeStamp() >= latestTime) {
-                    latestTime = event.getTimeStamp();
-                    latest = event.getPackageName();
-                }
-            }
-            return latest;
-        } catch (Throwable ignored) {
-            return null;
-        }
+        return UsageAccessProbe.currentForegroundPackage(this);
     }
 
     static boolean hasUsageAccess(Context context) {
-        try {
-            AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
-            int mode = appOps.checkOpNoThrow(
-                    AppOpsManager.OPSTR_GET_USAGE_STATS,
-                    android.os.Process.myUid(),
-                    context.getPackageName()
-            );
-            return mode == AppOpsManager.MODE_ALLOWED;
-        } catch (Throwable ignored) {
-            return false;
-        }
+        return UsageAccessProbe.hasAccess(context);
     }
 
     static String getMode(Context context) {
