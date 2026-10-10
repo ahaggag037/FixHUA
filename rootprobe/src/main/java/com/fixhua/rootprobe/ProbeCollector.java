@@ -182,7 +182,7 @@ final class ProbeCollector {
             }
         }
         String which = runCommand(900, "/system/bin/sh", "-c", "command -v su 2>/dev/null || true");
-        return which.isBlank() ? "NOT_FOUND" : normalize(which);
+        return which.trim().isEmpty() ? "NOT_FOUND" : normalize(which);
     }
 
     private String activeRootProbe() {
