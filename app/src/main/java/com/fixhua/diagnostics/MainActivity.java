@@ -33,6 +33,7 @@ public class MainActivity extends Activity {
     private TextView statusView;
     private Button modeButton;
     private Button diagnosticButton;
+    private Button copyReportButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,8 +61,15 @@ public class MainActivity extends Activity {
     }
 
     private void handleIntent(Intent intent) {
-        if (intent != null && GuardService.ACTION_REOPEN_GBOX.equals(intent.getAction())) {
+        if (intent == null) return;
+        if (GuardService.ACTION_REOPEN_GBOX.equals(intent.getAction())) {
             statusView.postDelayed(this::launchGBox, 150);
+        } else if (DeepDiagnosticService.ACTION_VIEW_REPORT.equals(intent.getAction())) {
+            Toast.makeText(this,
+                    DeepDiagnosticService.hasLatestReport(this)
+                            ? "جلسة التشخيص اكتملت — التقرير جاهز للنسخ"
+                            : "الجلسة انتهت لكن لا يوجد تقرير محفوظ",
+                    Toast.LENGTH_LONG).show();
         }
     }
 
@@ -73,25 +81,25 @@ public class MainActivity extends Activity {
         content.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         TextView title = new TextView(this);
-        title.setText("FixHUA Root Guard v3.2");
-        title.setTextSize(26);
+        title.setText("FixHUA Auto System Diagnostics v3.3");
+        title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_HORIZONTAL);
         content.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("حماية GBox + تشخيص لحظي قابل للنسخ. جلسة التشخيص تقرأ مؤشرات الذاكرة/PSI وCPU والحرارة والبطارية والشبكة كل ثانية، وزر التهنيجة يضع علامة زمنية دقيقة داخل السجل.");
+        subtitle.setText("تشخيص تلقائي للهاتف كله: تسجيل خفيف على thread مستقل، كشف التهنيج آليًا، رفع مؤقت لدقة القياس أثناء الحادثة، تقرير نهائي وإشعار عند اكتماله. لا يوجد زر يدوي للتهنيج.");
         subtitle.setTextSize(15);
         subtitle.setPadding(0, dp(8), 0, dp(14));
         content.addView(subtitle);
 
         statusView = new TextView(this);
-        statusView.setTextSize(15);
+        statusView.setTextSize(14);
         statusView.setTypeface(Typeface.MONOSPACE);
         statusView.setPadding(dp(12), dp(12), dp(12), dp(12));
         content.addView(statusView);
 
-        Button rootProbe = button("فحص وتفعيل صلاحية Root المتاحة");
+        Button rootProbe = button("فحص صلاحية Root المتاحة");
         rootProbe.setOnClickListener(v -> probeRoot());
         content.addView(rootProbe);
 
@@ -103,7 +111,7 @@ public class MainActivity extends Activity {
         modeButton.setOnClickListener(v -> cycleMode());
         content.addView(modeButton);
 
-        Button usage = button("تفعيل Usage Access للحماية التكيفية");
+        Button usage = button("تفعيل Usage Access لمراقبة تغيّر التطبيقات");
         usage.setOnClickListener(v -> openUsageAccess());
         content.addView(usage);
 
@@ -123,13 +131,9 @@ public class MainActivity extends Activity {
         diagnosticButton.setOnClickListener(v -> toggleDeepDiagnostics());
         content.addView(diagnosticButton);
 
-        Button lagMarker = button("حصلت تهنيجة الآن — ضع علامة زمنية");
-        lagMarker.setOnClickListener(v -> markLagNow());
-        content.addView(lagMarker);
-
-        Button report = button("إنشاء ونسخ تقرير الحالة الكامل");
-        report.setOnClickListener(v -> generateAndCopyReport(report));
-        content.addView(report);
+        copyReportButton = button("نسخ آخر تقرير مكتمل");
+        copyReportButton.setOnClickListener(v -> copyLatestReport());
+        content.addView(copyReportButton);
 
         Button stop = button("إيقاف الحماية وإرجاع تغييرات الجلسة");
         stop.setOnClickListener(v -> stopGuard());
@@ -140,7 +144,7 @@ public class MainActivity extends Activity {
         content.addView(refresh);
 
         TextView note = new TextView(this);
-        note.setText("الخصوصية: تقرير FixHUA لا يجمع الحسابات أو الرسائل أو الصور أو جهات الاتصال أو الموقع أو Android ID أو الرقم التسلسلي أو IP أو كلمات السر. FixHUA لا يعمل Root للجهاز ولا يفتح Bootloader، ولا يعطل حماية الحرارة، ولا يلمس Play Integrity/DRM.");
+        note.setText("حدود الرؤية: بدون Root/ADB لا يستطيع Android لتطبيق عادي كشف كل خدمات وDrivers وBinder أو سجلات التطبيقات الأخرى. FixHUA يسجل كل ما تسمح به الواجهات المتاحة ويضع UNAVAILABLE بدل اختراع قيمة. عند منح Usage Access قد يسجل أسماء حزم التطبيقات وتغيّر foreground، لكنه لا يجمع محتوى الرسائل أو الصور أو الحسابات أو كلمات السر.");
         note.setTextSize(13);
         note.setPadding(0, dp(12), 0, dp(24));
         content.addView(note);
@@ -158,8 +162,7 @@ public class MainActivity extends Activity {
         b.setMinHeight(dp(50));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        );
+                LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.bottomMargin = dp(7);
         b.setLayoutParams(lp);
         return b;
@@ -167,41 +170,40 @@ public class MainActivity extends Activity {
 
     private void refreshStatus() {
         String mode = GuardService.getMode(this);
+        boolean usage = UsageAccessProbe.hasAccess(this);
         StringBuilder b = new StringBuilder();
         b.append("الحماية: ").append(GuardService.active ? "مفعلة ✓" : "متوقفة").append('\n');
         b.append("الوضع: ").append(modeLabel(mode)).append('\n');
         b.append("Root: ").append(RootSessionController.lastStatus(this)).append('\n');
-        b.append("Usage Access: ")
-                .append(GuardService.hasUsageAccess(this) ? "مفعل ✓" : "غير مفعل — تعمل حماية Basic")
-                .append('\n');
+        b.append("Usage Access self-test: ").append(usage ? "PASS ✓" : "غير متاح").append('\n');
+        b.append("Foreground الآن: ").append(usage ? safe(UsageAccessProbe.currentForegroundPackage(this)) : "UNAVAILABLE").append('\n');
         b.append("GBox: ").append(packageSummary(GBOX)).append('\n');
         b.append("GBox battery exemption: ").append(ignoreState(GBOX)).append('\n');
         b.append("FixHUA battery exemption: ").append(ignoreState(getPackageName())).append('\n');
-        b.append("آخر حالة تشغيل: ").append(GuardService.lastState(this)).append('\n');
-        b.append("الجلسات: ").append(GuardService.stat(this, "sessions")).append('\n');
-        b.append("وقت الحماية الكلي: ").append(formatDuration(GuardService.stat(this, "total_guard_ms"))).append('\n');
-        b.append("آخر peak thermal: ").append(GuardService.stat(this, "last_peak_thermal")).append('\n');
-        b.append("التشخيص اللحظي: ").append(DeepDiagnosticService.active ? "يعمل ✓" : "متوقف").append('\n');
-        b.append("عينات التشخيص: ").append(DeepDiagnosticService.sampleCount(this)).append('\n');
+        b.append("آخر حالة Guard: ").append(GuardService.lastState(this)).append('\n');
+        b.append("التشخيص التلقائي: ").append(DeepDiagnosticService.active ? "يعمل ✓" : "متوقف").append('\n');
+        b.append("حالة الكاشف: ").append(DeepDiagnosticService.detectorState(this)).append('\n');
+        b.append("العينات: ").append(DeepDiagnosticService.sampleCount(this)).append('\n');
+        b.append("الحوادث المكتملة: ").append(DeepDiagnosticService.incidentCount(this)).append('\n');
         long diagStarted = DeepDiagnosticService.startedAt(this);
         if (diagStarted > 0L) b.append("بدأ التشخيص: ").append(formatTimestamp(diagStarted)).append('\n');
+        b.append("آخر تقرير: ").append(DeepDiagnosticService.hasLatestReport(this) ? "جاهز ✓" : "غير موجود").append('\n');
         statusView.setText(b.toString());
+
         modeButton.setText("وضع الحماية: " + modeLabel(mode) + " — اضغط للتغيير");
         diagnosticButton.setText(DeepDiagnosticService.active
-                ? "إيقاف جلسة التشخيص وحفظ السجل"
-                : "ابدأ جلسة تشخيص دقيقة (قراءة كل ثانية)");
+                ? "إنهاء جلسة التشخيص وبناء التقرير"
+                : "ابدأ جلسة التشخيص التلقائي (حتى 30 دقيقة)");
+        copyReportButton.setEnabled(DeepDiagnosticService.hasLatestReport(this));
     }
 
     private void probeRoot() {
-        Toast.makeText(this, "سيظهر طلب Root إذا كان su متاحًا", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "سيظهر طلب Root فقط إذا كان su موجودًا بالفعل", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             boolean root = RootSessionController.probeAndStore(getApplicationContext());
             runOnUiThread(() -> {
-                Toast.makeText(
-                        MainActivity.this,
-                        root ? "تم تأكيد Root ✓" : "Root غير متاح — سيعمل الوضع العادي",
-                        Toast.LENGTH_LONG
-                ).show();
+                Toast.makeText(this, root ? "تم تأكيد Root ✓" : "Root غير متاح — سيعمل الوضع العادي",
+                        Toast.LENGTH_LONG).show();
                 refreshStatus();
             });
         }, "FixHUA-RootProbe").start();
@@ -214,12 +216,11 @@ public class MainActivity extends Activity {
         }
         try {
             startForegroundService(new Intent(this, GuardService.class));
+            statusView.postDelayed(this::launchGBox, 250);
+            statusView.postDelayed(this::refreshStatus, 850);
         } catch (Throwable t) {
             Toast.makeText(this, "تعذر بدء الحماية: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
-            return;
         }
-        statusView.postDelayed(this::launchGBox, 250);
-        statusView.postDelayed(this::refreshStatus, 850);
     }
 
     private void launchGBox() {
@@ -239,70 +240,39 @@ public class MainActivity extends Activity {
     private void toggleDeepDiagnostics() {
         if (DeepDiagnosticService.active) {
             Intent stop = new Intent(this, DeepDiagnosticService.class).setAction(DeepDiagnosticService.ACTION_STOP);
-            try {
-                startService(stop);
-            } catch (Throwable t) {
-                stopService(new Intent(this, DeepDiagnosticService.class));
-            }
-            Toast.makeText(this, "تم إيقاف جلسة التشخيص وحفظ السجل", Toast.LENGTH_SHORT).show();
-            statusView.postDelayed(this::refreshStatus, 500);
+            try { startService(stop); } catch (Throwable t) { stopService(new Intent(this, DeepDiagnosticService.class)); }
+            Toast.makeText(this, "جارٍ إنهاء الجلسة وبناء التقرير… سيصلك إشعار عند اكتماله", Toast.LENGTH_LONG).show();
+            statusView.postDelayed(this::refreshStatus, 900);
             return;
         }
         try {
             startForegroundService(new Intent(this, DeepDiagnosticService.class));
-            Toast.makeText(this, "بدأ التشخيص: قراءة كل ثانية لمدة أقصاها 20 دقيقة", Toast.LENGTH_LONG).show();
-            statusView.postDelayed(this::refreshStatus, 600);
+            Toast.makeText(this, "بدأ التشخيص التلقائي — استخدم الهاتف طبيعيًا ولا تحتاج لأي زر أثناء التهنيج", Toast.LENGTH_LONG).show();
+            statusView.postDelayed(this::refreshStatus, 700);
         } catch (Throwable t) {
             Toast.makeText(this, "تعذر بدء التشخيص: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
         }
     }
 
-    private void markLagNow() {
-        DiagnosticTimeline.recordEvent(this, "user_lag_marker", "user_pressed_lag_marker_now");
-        if (DeepDiagnosticService.active) {
-            Toast.makeText(this, "تم تسجيل لحظة التهنيج ✓ — استمر قليلًا قبل إيقاف التشخيص", Toast.LENGTH_LONG).show();
-        } else {
-            Toast.makeText(this, "تم تسجيل العلامة، لكن جلسة التشخيص غير مفعلة؛ شغّلها للحصول على عينات قبل/بعد المشكلة", Toast.LENGTH_LONG).show();
+    private void copyLatestReport() {
+        String report = DeepDiagnosticService.readLatestReport(this);
+        if (report == null || report.isEmpty()) {
+            Toast.makeText(this, "لا يوجد تقرير مكتمل حتى الآن", Toast.LENGTH_LONG).show();
+            return;
         }
-    }
-
-    private void generateAndCopyReport(Button reportButton) {
-        reportButton.setEnabled(false);
-        reportButton.setText("جارٍ إنشاء التقرير…");
-        DiagnosticTimeline.recordEvent(this, "report_requested", "user_requested_copyable_report");
-        new Thread(() -> {
-            try {
-                String report = DiagnosticBundle.build(getApplicationContext());
-                runOnUiThread(() -> {
-                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    if (clipboard == null) {
-                        Toast.makeText(MainActivity.this, "تعذر الوصول إلى الحافظة", Toast.LENGTH_LONG).show();
-                    } else {
-                        clipboard.setPrimaryClip(ClipData.newPlainText("FixHUA diagnostic report", report));
-                        Toast.makeText(MainActivity.this, "تم إنشاء التقرير ونسخه للحافظة ✓ — الصقه وأرسله لي", Toast.LENGTH_LONG).show();
-                    }
-                    reportButton.setEnabled(true);
-                    reportButton.setText("إنشاء ونسخ تقرير الحالة الكامل");
-                    refreshStatus();
-                });
-            } catch (Throwable t) {
-                runOnUiThread(() -> {
-                    reportButton.setEnabled(true);
-                    reportButton.setText("إنشاء ونسخ تقرير الحالة الكامل");
-                    Toast.makeText(MainActivity.this, "فشل إنشاء التقرير: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
-                });
-            }
-        }, "FixHUA-ReportBuilder").start();
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            Toast.makeText(this, "تعذر الوصول للحافظة", Toast.LENGTH_LONG).show();
+            return;
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("FixHUA diagnostic report", report));
+        Toast.makeText(this, "تم نسخ التقرير الكامل ✓", Toast.LENGTH_LONG).show();
     }
 
     private void stopGuard() {
         Intent stop = new Intent(this, GuardService.class).setAction(GuardService.ACTION_STOP);
-        try {
-            startService(stop);
-        } catch (Throwable ignored) {
-            stopService(new Intent(this, GuardService.class));
-        }
-        Toast.makeText(this, "تم إيقاف الحماية وسيتم إرجاع تغييرات الجلسة", Toast.LENGTH_SHORT).show();
+        try { startService(stop); } catch (Throwable ignored) { stopService(new Intent(this, GuardService.class)); }
+        Toast.makeText(this, "تم طلب إيقاف الحماية وإرجاع تغييرات الجلسة", Toast.LENGTH_SHORT).show();
         statusView.postDelayed(this::refreshStatus, 900);
     }
 
@@ -315,6 +285,54 @@ public class MainActivity extends Activity {
         GuardService.setMode(this, next);
         Toast.makeText(this, "تم اختيار: " + modeLabel(next), Toast.LENGTH_SHORT).show();
         refreshStatus();
+    }
+
+    private void openUsageAccess() {
+        try {
+            startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "تعذر فتح Usage Access على هذا النظام", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openHuaweiStartupManager() {
+        String[][] candidates = new String[][]{
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
+                {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"}
+        };
+        for (String[] candidate : candidates) {
+            try {
+                Intent intent = new Intent();
+                intent.setComponent(new ComponentName(candidate[0], candidate[1]));
+                startActivity(intent);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        try {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Throwable t) {
+            Toast.makeText(this, "تعذر فتح إعدادات الخلفية تلقائيًا", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void requestOwnBatteryExemption() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                Toast.makeText(this, "FixHUA خارج تقييد البطارية بالفعل ✓", Toast.LENGTH_LONG).show();
+                return;
+            }
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Throwable t) {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Throwable ignored) {
+                Toast.makeText(this, "تعذر فتح إعدادات البطارية", Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     private String modeLabel(String mode) {
@@ -332,6 +350,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String ignoreState(String pkg) {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            return pm.isIgnoringBatteryOptimizations(pkg) ? "مستثنى ✓" : "مقيد";
+        } catch (Throwable t) {
+            return "UNKNOWN";
+        }
+    }
+
     private boolean isInstalled(String pkg) {
         try {
             getPackageManager().getPackageInfo(pkg, 0);
@@ -341,80 +368,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String ignoreState(String pkg) {
-        if (!pkg.equals(getPackageName()) && !isInstalled(pkg)) return "غير مثبت";
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            return pm.isIgnoringBatteryOptimizations(pkg) ? "غير مقيد ✓" : "مقيد ⚠";
-        } catch (Throwable t) {
-            return "غير معروف";
-        }
+    private String formatTimestamp(long millis) {
+        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date(millis));
     }
 
-    private void openUsageAccess() {
-        try {
-            startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
-            Toast.makeText(this, "فعّل Usage Access لـ FixHUA", Toast.LENGTH_LONG).show();
-        } catch (Throwable t) {
-            Toast.makeText(this, "تعذر فتح Usage Access", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void requestOwnBatteryExemption() {
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            if (pm.isIgnoringBatteryOptimizations(getPackageName())) {
-                Toast.makeText(this, "FixHUA بالفعل غير مقيد بالبطارية", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-        } catch (Throwable t) {
-            try {
-                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-            } catch (Throwable ignored) {
-                Toast.makeText(this, "تعذر فتح إعدادات البطارية على هذا النظام", Toast.LENGTH_LONG).show();
-            }
-        }
-    }
-
-    private void openHuaweiStartupManager() {
-        String[][] targets = new String[][]{
-                {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
-                {"com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"},
-                {"com.huawei.systemmanager", "com.huawei.systemmanager.power.ui.HwPowerManagerActivity"}
-        };
-        for (String[] target : targets) {
-            try {
-                Intent i = new Intent();
-                i.setComponent(new ComponentName(target[0], target[1]));
-                startActivity(i);
-                Toast.makeText(this, "اسمح لـ GBox وFixHUA بالتشغيل التلقائي والعمل في الخلفية", Toast.LENGTH_LONG).show();
-                return;
-            } catch (ActivityNotFoundException ignored) {
-            } catch (Throwable ignored) {
-            }
-        }
-        try {
-            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-            Toast.makeText(this, "لم أجد مدير Huawei المباشر؛ فتحت إعدادات البطارية العامة بدلًا منه", Toast.LENGTH_LONG).show();
-        } catch (Throwable ignored) {
-            Toast.makeText(this, "تعذر فتح إعدادات الخلفية على هذا الإصدار", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private String formatDuration(long ms) {
-        long minutes = Math.max(0L, ms / 60_000L);
-        if (minutes < 60L) return minutes + " دقيقة";
-        return (minutes / 60L) + "س " + (minutes % 60L) + "د";
-    }
-
-    private String formatTimestamp(long epochMs) {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(epochMs));
+    private String safe(String value) {
+        return value == null || value.trim().isEmpty() ? "UNAVAILABLE" : value;
     }
 
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 }
