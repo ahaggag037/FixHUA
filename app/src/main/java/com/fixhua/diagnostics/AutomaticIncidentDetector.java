@@ -133,7 +133,7 @@ final class AutomaticIncidentDetector {
         int value = 0;
         List<String> reasons = new ArrayList<>();
 
-        if (in.samplerLateMs >= 1_200L) { value += 4; reasons.add("sampler_late>=1200ms"); }
+        if (in.samplerLateMs >= 1_200L) { value += 6; reasons.add("sampler_late>=1200ms"); }
         else if (in.samplerLateMs >= 600L) { value += 3; reasons.add("sampler_late>=600ms"); }
         else if (in.samplerLateMs >= 250L) { value += 1; reasons.add("sampler_late>=250ms"); }
 
