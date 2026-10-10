@@ -22,11 +22,12 @@ import android.os.Looper;
 import android.os.PowerManager;
 
 /**
- * Temporary active guard for user-started GBox sessions.
+ * Active guard for user-started GBox sessions.
  *
- * It does not modify GBox, spoof device properties, disable thermal protection,
- * or expose an unrestricted privileged endpoint. It only holds bounded host-side
- * CPU/Wi-Fi performance locks during an explicit session and backs off on thermal pressure.
+ * Non-root mode uses bounded host-side CPU/Wi-Fi locks. If an already-installed
+ * root manager exposes su, RootSessionController may temporarily place GBox on
+ * the AOSP Doze whitelist and active standby bucket, then restores the previous
+ * state when the session ends. This app never attempts to root the phone.
  */
 public class GuardService extends Service {
     public static final String ACTION_STOP = "com.fixhua.diagnostics.GUARD_STOP";
@@ -51,6 +52,7 @@ public class GuardService extends Service {
     private PowerManager.WakeLock cpuWakeLock;
     private WifiManager.WifiLock wifiLock;
     private SessionPolicy.WifiMode heldWifiMode = SessionPolicy.WifiMode.NONE;
+    private RootSessionController rootController;
 
     private long sessionStartedAt;
     private long lastGboxSeenAt;
@@ -71,8 +73,9 @@ public class GuardService extends Service {
         active = true;
         sessionStartedAt = System.currentTimeMillis();
         incrementLong("sessions", 1L);
+        rootController = new RootSessionController(this);
         createChannel();
-        startForeground(NOTIFICATION_ID, buildNotification("Starting active guard…"));
+        startForeground(NOTIFICATION_ID, buildNotification("Starting Root Guard…"));
         handler.post(watchdog);
         handler.postDelayed(this::stopSelf, MAX_SESSION_MS);
     }
@@ -128,6 +131,9 @@ public class GuardService extends Service {
 
         setCpuLock(decision.cpuWakeLock);
         setWifiMode(decision.wifiMode);
+        if (rootController != null) {
+            rootController.tick(gboxForeground || recentGbox || !usageAccess);
+        }
 
         String state = stateLabel(mode, usageAccess, gboxForeground, thermal, decision);
         saveRuntimeState(state, thermal, decision);
@@ -147,7 +153,7 @@ public class GuardService extends Service {
         if (thermal >= PowerManager.THERMAL_STATUS_SEVERE) {
             b.append("thermal safeguard");
         } else if (!usageAccess) {
-            b.append("basic explicit-session protection");
+            b.append("explicit-session protection");
         } else if (gboxForeground) {
             b.append("GBox active");
         } else {
@@ -156,6 +162,8 @@ public class GuardService extends Service {
         if (decision.wifiMode == SessionPolicy.WifiMode.LOW_LATENCY) b.append(" • Wi-Fi low latency");
         if (decision.wifiMode == SessionPolicy.WifiMode.HIGH_PERF) b.append(" • Wi-Fi high perf");
         if (decision.cpuWakeLock) b.append(" • CPU awake");
+        String root = RootSessionController.lastStatus(this);
+        if (root.contains("نشط")) b.append(" • Root Guard");
         return b.toString();
     }
 
@@ -163,7 +171,7 @@ public class GuardService extends Service {
         try {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             if (cpuWakeLock == null) {
-                cpuWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FixHUA:ActiveGuardCpu");
+                cpuWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FixHUA:RootGuardCpu");
                 cpuWakeLock.setReferenceCounted(false);
             }
             if (wanted && !cpuWakeLock.isHeld()) cpuWakeLock.acquire(MAX_SESSION_MS);
@@ -186,7 +194,7 @@ public class GuardService extends Service {
             if (wanted == SessionPolicy.WifiMode.LOW_LATENCY && Build.VERSION.SDK_INT >= 29) {
                 lockMode = WifiManager.WIFI_MODE_FULL_LOW_LATENCY;
             }
-            wifiLock = wm.createWifiLock(lockMode, "FixHUA:ActiveGuardWifi");
+            wifiLock = wm.createWifiLock(lockMode, "FixHUA:RootGuardWifi");
             wifiLock.setReferenceCounted(false);
             wifiLock.acquire();
             heldWifiMode = wanted;
@@ -317,7 +325,7 @@ public class GuardService extends Service {
 
         return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-                .setContentTitle("FixHUA Active Guard v2.2")
+                .setContentTitle("FixHUA Root Guard v3")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)
@@ -342,10 +350,10 @@ public class GuardService extends Service {
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "FixHUA active protection",
+                    "FixHUA Root Guard",
                     NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("Visible while the user-started GBox active guard is running");
+            channel.setDescription("Visible while the user-started GBox protection session is running");
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null) nm.createNotificationChannel(channel);
         }
@@ -355,6 +363,10 @@ public class GuardService extends Service {
     public void onDestroy() {
         active = false;
         handler.removeCallbacksAndMessages(null);
+        if (rootController != null) {
+            rootController.close();
+            rootController = null;
+        }
         releaseWifiLock();
         if (cpuWakeLock != null && cpuWakeLock.isHeld()) {
             try {
