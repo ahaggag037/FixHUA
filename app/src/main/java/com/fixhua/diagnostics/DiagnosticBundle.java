@@ -16,7 +16,7 @@ import java.util.Locale;
  * The report deliberately separates observed facts from derived signals and
  * hypotheses so later architecture decisions are not based on an accidental
  * inference. It does not collect account data, messages, photos, contacts,
- * precise location, Android ID, serial number, or IP addresses.
+ * precise location, Android ID, serial number, IP addresses, or passwords.
  */
 final class DiagnosticBundle {
     private static final String GBOX = "com.gbox.android";
@@ -26,9 +26,9 @@ final class DiagnosticBundle {
     static String build(Context context) {
         StringBuilder out = new StringBuilder(96_000);
         out.append("FIXHUA_FULL_DIAGNOSTIC_BUNDLE\n");
-        out.append("schema=2\n");
+        out.append("schema=3\n");
         out.append("purpose=machine_assisted_engineering_analysis\n");
-        out.append("privacy=NO accounts/messages/photos/contacts/location/android_id/serial/ip\n\n");
+        out.append("privacy=NO accounts/messages/photos/contacts/location/android_id/serial/ip/passwords\n\n");
 
         appendExperimentIdentity(context, out);
         out.append("\n=== RAW_FACTS_STATIC ===\n");
@@ -72,6 +72,9 @@ final class DiagnosticBundle {
         line(out, "session_count", String.valueOf(GuardService.stat(context, "sessions")));
         line(out, "last_session_ms", String.valueOf(GuardService.stat(context, "last_session_ms")));
         line(out, "last_peak_thermal", String.valueOf(GuardService.stat(context, "last_peak_thermal")));
+        line(out, "deep_diagnostic_active_now", String.valueOf(DeepDiagnosticService.active));
+        line(out, "deep_diagnostic_samples", String.valueOf(DeepDiagnosticService.sampleCount(context)));
+        line(out, "deep_diagnostic_started_at_epoch_ms", String.valueOf(DeepDiagnosticService.startedAt(context)));
     }
 
     private static void appendCapabilityAndMissingEvidence(Context context, StringBuilder out) {
@@ -129,7 +132,8 @@ final class DiagnosticBundle {
         line(out, "DERIVED_ram_available_ratio", availableRatio < 0 ? "UNKNOWN" : String.format(Locale.US, "%.4f", availableRatio));
         line(out, "DERIVED_guard_total_minutes", String.valueOf(GuardService.stat(context, "total_guard_ms") / 60_000L));
         line(out, "DERIVED_gbox_focus_entries", String.valueOf(GuardService.stat(context, "gbox_focus_entries")));
-        line(out, "DERIVED_timeline_sampling_interval_seconds", "~5");
+        line(out, "DERIVED_guard_sampling_interval_seconds", "~5");
+        line(out, "DERIVED_deep_diagnostic_sampling_interval_seconds", "1");
     }
 
     private static void appendArchitectureSignals(Context context, StringBuilder out) {
