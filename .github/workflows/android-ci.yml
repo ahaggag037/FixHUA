@@ -36,7 +36,12 @@ jobs:
         run: gradle --stacktrace testReleaseUnitTest
 
       - name: Lint release
-        run: gradle --stacktrace lintRelease
+        run: |
+          if ! gradle --stacktrace lintRelease; then
+            echo "===== FULL LINT REPORT ====="
+            cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt || true
+            exit 1
+          fi
 
       - name: Build unsigned release APK
         run: gradle --stacktrace assembleRelease
