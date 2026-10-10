@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FixHUA 2.1</string>
+    <string name="subtitle">Compatibility &amp; Stability Manager — Temporary Enhanced Build</string>
+    <string name="scanning">جاري الفحص…</string>
+    <string name="scanning_device">جاري فحص الجهاز…</string>
+    <string name="preflight_scanning">جاري الفحص قبل التشغيل…</string>
+    <string name="check_now">فحص الجهاز الآن</string>
+    <string name="fix_most_important">إصلاح أهم مشكلة</string>
+    <string name="launch_gbox_preflight">فحص ثم تشغيل GBox</string>
+    <string name="capture_incident">التقاط حالة بعد مشكلة GBox</string>
+    <string name="recovery_center">مركز إصلاح GBox</string>
+    <string name="huawei_background_settings">إعدادات Huawei للعمل في الخلفية</string>
+    <string name="battery_optimization_settings">إعدادات تحسين البطارية</string>
+    <string name="gbox_app_info">معلومات تطبيق GBox</string>
+    <string name="share_report">مشاركة التقرير</string>
+    <string name="footer_note">ملاحظة: FixHUA لا يغيّر هوية الجهاز، ولا يجبر إغلاق التطبيقات، ولا يتجاوز فحوص الأمان. الفحص لقطة لحظية ولا يثبت سبب خروج GBox أو أي تطبيق.</string>
+
+    <string name="status_ready">جاهز</string>
+    <string name="status_attention">يحتاج ضبط</string>
+    <string name="status_blocked">غير جاهز</string>
+    <string name="detected">مكتشفة</string>
+    <string name="uncertain">غير مؤكدة</string>
+    <string name="enabled">مفعل</string>
+    <string name="off">متوقف</string>
+    <string name="unknown">غير معروف</string>
+    <string name="not_installed">غير مثبت</string>
+    <string name="disabled">معطّل</string>
+    <string name="not_launchable">غير قابل للتشغيل</string>
+    <string name="suspended">معلّق</string>
+
+    <string name="network_offline">لا توجد شبكة</string>
+    <string name="network_no_internet">الشبكة بلا إنترنت</string>
+    <string name="network_unvalidated">غير متحقق</string>
+    <string name="network_validated">متحقق</string>
+
+    <string name="thermal_none">طبيعي</string>
+    <string name="thermal_light">خفيف</string>
+    <string name="thermal_moderate">متوسط</string>
+    <string name="thermal_severe">مرتفع</string>
+    <string name="thermal_critical">حرج</string>
+    <string name="thermal_emergency">طوارئ</string>
+    <string name="thermal_shutdown">إيقاف حراري</string>
+
+    <string name="summary_status">الحالة: %1$s</string>
+    <string name="summary_gbox">GBox: %1$s</string>
+    <string name="summary_huawei">بيئة Huawei: %1$s</string>
+    <string name="summary_network">الإنترنت: %1$s</string>
+    <string name="summary_power_save">توفير الطاقة: %1$s</string>
+    <string name="summary_ram">RAM متاح: %1$d / %2$d MB</string>
+    <string name="summary_ram_unknown">RAM متاح: غير معروف</string>
+    <string name="summary_storage">المساحة الحرة: %1$s</string>
+    <string name="summary_storage_unknown">المساحة الحرة: غير معروفة</string>
+    <string name="summary_thermal">الحالة الحرارية: %1$s</string>
+    <string name="summary_battery">البطارية: %1$d%%</string>
+    <string name="last_scan">آخر فحص: %1$s</string>
+
+    <string name="results_header">النتائج:</string>
+    <string name="no_obvious_issues">✓ لم يجد FixHUA مشاكل واضحة في الفحص الحالي.</string>
+    <string name="no_action_needed">لا توجد مشكلة تحتاج إجراء</string>
+    <string name="no_safe_direct_action">لا يوجد إجراء آمن مباشر</string>
+    <string name="no_safe_direct_action_toast">لا يوجد إجراء آمن مباشر لهذه الحالة؛ اتبع الملاحظة ثم أعد الفحص.</string>
+    <string name="scan_updated">تم تحديث الفحص</string>
+
+    <string name="cannot_launch_gbox">لا يمكن تشغيل GBox الآن</string>
+    <string name="gbox_not_ready">GBox غير جاهز للتشغيل من النظام.</string>
+    <string name="open_relevant_setting">فتح الإعداد المناسب</string>
+    <string name="before_launching_gbox">قبل تشغيل GBox</string>
+    <string name="warning_summary_intro">وجد FixHUA نقاطًا قد تؤثر على الاستقرار:</string>
+    <string name="warning_summary_outro">يمكنك التشغيل الآن أو الرجوع وإصلاحها أولًا.</string>
+    <string name="launch_now">تشغيل الآن</string>
+    <string name="cancel">إلغاء</string>
+    <string name="close">إغلاق</string>
+    <string name="gbox_launch_failed">تعذر تشغيل GBox من النظام</string>
+
+    <string name="capturing_incident">جاري التقاط حالة الجهاز بعد المشكلة…</string>
+    <string name="incident_snapshot_ready">تم التقاط لقطة المشكلة</string>
+    <string name="incident_snapshot_note">تم حفظ الحالة في تقرير لحظي يمكن نسخه أو مشاركته. هذه اللقطة تساعد التشخيص لكنها لا تثبت سبب الخروج وحدها.</string>
+    <string name="incident_subject">FixHUA incident snapshot</string>
+    <string name="share">مشاركة</string>
+    <string name="copy_report">نسخ التقرير</string>
+    <string name="creating_report">جاري إنشاء التقرير…</string>
+    <string name="report_subject">FixHUA v2.1 report</string>
+    <string name="share_unavailable">لا يوجد تطبيق مشاركة؛ تم عرض التقرير داخل FixHUA</string>
+    <string name="report_copied">تم نسخ التقرير</string>
+    <string name="copy_failed">تعذر الوصول إلى الحافظة</string>
+
+    <string-array name="recovery_actions">
+        <item>فتح معلومات GBox</item>
+        <item>فتح Huawei App launch</item>
+        <item>فتح تحسين البطارية</item>
+        <item>فتح إعدادات البطارية</item>
+        <item>فتح خيارات المطور</item>
+        <item>فتح إعدادات التخزين</item>
+        <item>فتح إعدادات الشبكة</item>
+        <item>التقاط حالة المشكلة الآن</item>
+        <item>تشغيل GBox</item>
+    </string-array>
+</resources>
