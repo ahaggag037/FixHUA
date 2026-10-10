@@ -10,43 +10,37 @@ import android.os.PowerManager;
 import java.io.File;
 import java.util.Locale;
 
-/**
- * Produces the user-copyable diagnostic bundle intended for engineering analysis.
- *
- * The report deliberately separates observed facts from derived signals and
- * hypotheses so later architecture decisions are not based on an accidental
- * inference. It does not collect account data, messages, photos, contacts,
- * precise location, Android ID, serial number, IP addresses, or passwords.
- */
+/** Builds the final copyable report after a diagnostic session completes. */
 final class DiagnosticBundle {
     private static final String GBOX = "com.gbox.android";
 
     private DiagnosticBundle() {}
 
     static String build(Context context) {
-        StringBuilder out = new StringBuilder(96_000);
+        StringBuilder out = new StringBuilder(160_000);
         out.append("FIXHUA_FULL_DIAGNOSTIC_BUNDLE\n");
-        out.append("schema=3\n");
-        out.append("purpose=machine_assisted_engineering_analysis\n");
-        out.append("privacy=NO accounts/messages/photos/contacts/location/android_id/serial/ip/passwords\n\n");
+        out.append("schema=4\n");
+        out.append("purpose=automatic_device_wide_lag_diagnostics\n");
+        out.append("privacy=NO account/message/photo/contact/location/android_id/serial/ip/password content; foreground package names may be recorded when Usage Access is granted\n\n");
 
         appendExperimentIdentity(context, out);
         out.append("\n=== RAW_FACTS_STATIC ===\n");
         out.append(DiagnosticCollector.collect(context));
-
         appendCapabilityAndMissingEvidence(context, out);
         appendDerivedMetrics(context, out);
         appendArchitectureSignals(context, out);
 
         out.append("\n=== RAW_FACTS_TIMELINE ===\n");
-        out.append(DiagnosticTimeline.report(context, 1400));
+        out.append(DiagnosticTimeline.report(context, 4000));
 
         out.append("\n=== INTERPRETATION_CONTRACT ===\n");
         out.append("FACT=direct API/file/package observation.\n");
         out.append("DERIVED=calculation from facts.\n");
         out.append("HYPOTHESIS=correlation-based explanation, never proof by itself.\n");
         out.append("UNKNOWN=important evidence the current privilege/API surface cannot obtain.\n");
-        out.append("Rule: architecture changes should cite supporting facts/timestamps and preserve competing hypotheses.\n");
+        out.append("Rule: CPU frequency drops alone are never sufficient evidence of a freeze.\n");
+        out.append("Rule: unavailable PSI is represented as unavailable/NA, not zero.\n");
+        out.append("Rule: automatic incidents require multiple signals or a strong service-stall signal, then a stable recovery window before closing.\n");
         return out.toString();
     }
 
@@ -67,20 +61,22 @@ final class DiagnosticBundle {
         line(out, "guard_active_now", String.valueOf(GuardService.active));
         line(out, "guard_last_state", GuardService.lastState(context));
         line(out, "root_last_status", RootSessionController.lastStatus(context));
-        line(out, "usage_access", String.valueOf(GuardService.hasUsageAccess(context)));
+        line(out, "usage_access_self_test", String.valueOf(UsageAccessProbe.hasAccess(context)));
         line(out, "gbox_installed", String.valueOf(isInstalled(context, GBOX)));
-        line(out, "session_count", String.valueOf(GuardService.stat(context, "sessions")));
-        line(out, "last_session_ms", String.valueOf(GuardService.stat(context, "last_session_ms")));
-        line(out, "last_peak_thermal", String.valueOf(GuardService.stat(context, "last_peak_thermal")));
         line(out, "deep_diagnostic_active_now", String.valueOf(DeepDiagnosticService.active));
         line(out, "deep_diagnostic_samples", String.valueOf(DeepDiagnosticService.sampleCount(context)));
         line(out, "deep_diagnostic_started_at_epoch_ms", String.valueOf(DeepDiagnosticService.startedAt(context)));
+        line(out, "automatic_incidents_completed", String.valueOf(DeepDiagnosticService.incidentCount(context)));
+        line(out, "detector_last_state", DeepDiagnosticService.detectorState(context));
+        line(out, "report_generated_during_session_finalization", "true");
     }
 
     private static void appendCapabilityAndMissingEvidence(Context context, StringBuilder out) {
         out.append("\n=== CAPABILITY_SELF_TESTS ===\n");
-        boolean usage = GuardService.hasUsageAccess(context);
-        boolean psi = new File("/proc/pressure/memory").canRead();
+        boolean usage = UsageAccessProbe.hasAccess(context);
+        boolean memoryPsi = new File("/proc/pressure/memory").canRead();
+        boolean ioPsi = new File("/proc/pressure/io").canRead();
+        boolean procStat = new File("/proc/stat").canRead();
         int cpuReadable = readableCpuFreqCores();
         boolean gbox = isInstalled(context, GBOX);
         boolean rootKnownAvailable = context.getSharedPreferences(GuardService.PREFS, Context.MODE_PRIVATE)
@@ -95,7 +91,9 @@ final class DiagnosticBundle {
         }
 
         line(out, "TEST_usage_access", passFail(usage));
-        line(out, "TEST_memory_psi_readable", passFail(psi));
+        line(out, "TEST_memory_psi_readable", passFail(memoryPsi));
+        line(out, "TEST_io_psi_readable", passFail(ioPsi));
+        line(out, "TEST_proc_stat_readable", passFail(procStat));
         line(out, "TEST_cpu_freq_readable_cores", String.valueOf(cpuReadable));
         line(out, "TEST_thermal_api", passFail(thermalApi));
         line(out, "TEST_gbox_package_visible", passFail(gbox));
@@ -103,24 +101,38 @@ final class DiagnosticBundle {
 
         out.append("\n=== MISSING_EVIDENCE ===\n");
         if (!usage) {
-            unknown(out, "foreground_history", "Usage Access is not granted", "grant Usage Access; no root required");
+            unknown(out, "foreground_history", "Usage Access self-test failed",
+                    "grant Usage Access; FixHUA will continue system-level metrics without it");
         }
-        if (!psi) {
-            unknown(out, "memory_psi", "kernel path /proc/pressure/memory is unreadable or unsupported", "device/kernel support or privileged collector may be required");
+        if (!memoryPsi) {
+            unknown(out, "memory_psi", "kernel PSI path is unreadable/unsupported",
+                    "RAM available ratio + ActivityManager.lowMemory remain active fallbacks");
+        }
+        if (!ioPsi) {
+            unknown(out, "io_psi", "kernel I/O PSI path is unreadable/unsupported",
+                    "storage free space remains visible but kernel I/O pressure cannot be inferred directly");
+        }
+        if (!procStat) {
+            unknown(out, "cpu_load", "/proc/stat is unreadable",
+                    "CPU frequency will be recorded but frequency-only drops will not trigger high-confidence attribution");
         }
         if (cpuReadable == 0) {
-            unknown(out, "per_core_cpu_frequency", "cpufreq sysfs paths are unreadable/absent", "root or a device-specific metrics backend may be required");
+            unknown(out, "per_core_cpu_frequency", "cpufreq sysfs paths are unreadable/absent",
+                    "CPU-load and other system-pressure evidence remain usable");
         }
         if (!rootKnownAvailable) {
-            unknown(out, "root_only_kernel_and_process_evidence", "no previously confirmed su/root capability", "root-only diagnostics intentionally unavailable");
+            unknown(out, "kernel_driver_binder_service_details",
+                    "normal Android sandbox blocks full system/service/driver visibility",
+                    "root/ADB/Shizuku can expand future diagnostics but are not baseline dependencies");
         }
         if (!gbox) {
-            unknown(out, "gbox_runtime", "GBox package is not visible/installed", "install or expose GBox package before reproduction");
+            unknown(out, "gbox_runtime", "GBox package is not visible/installed",
+                    "install or expose GBox before a GBox-specific reproduction");
         }
-        unknown(out, "gbox_private_logs", "Android app sandbox blocks another app's private files/logs", "requires explicit privileged/root diagnostic path; baseline app will not bypass sandbox");
-        unknown(out, "gbox_guest_process_internal_state", "virtualized guest internals are not exposed by normal Android APIs", "requires GBox-supported diagnostics or carefully scoped privileged observation");
-        unknown(out, "gbox_historical_exit_reason", "ApplicationExitInfo is reliably available only for FixHUA's own process in this app context", "privileged/system evidence would be needed for stronger attribution");
-        unknown(out, "frame_jank_inside_gbox_guest", "FixHUA cannot directly instrument another app's private rendering pipeline", "future external perfetto/root instrumentation may be evaluated if evidence warrants it");
+        unknown(out, "other_apps_private_logs", "Android sandbox blocks private files/logcat for other apps",
+                "FixHUA intentionally does not bypass app sandboxes");
+        unknown(out, "frame_jank_inside_other_apps", "normal apps cannot directly instrument another app's render pipeline",
+                "automatic incidents therefore use system pressure/stall correlations, not fabricated frame data");
     }
 
     private static void appendDerivedMetrics(Context context, StringBuilder out) {
@@ -132,31 +144,33 @@ final class DiagnosticBundle {
         line(out, "DERIVED_ram_available_ratio", availableRatio < 0 ? "UNKNOWN" : String.format(Locale.US, "%.4f", availableRatio));
         line(out, "DERIVED_guard_total_minutes", String.valueOf(GuardService.stat(context, "total_guard_ms") / 60_000L));
         line(out, "DERIVED_gbox_focus_entries", String.valueOf(GuardService.stat(context, "gbox_focus_entries")));
-        line(out, "DERIVED_guard_sampling_interval_seconds", "~5");
-        line(out, "DERIVED_deep_diagnostic_sampling_interval_seconds", "1");
+        line(out, "DERIVED_normal_sampling_interval_seconds", "1.0");
+        line(out, "DERIVED_incident_sampling_interval_seconds", "0.5");
+        line(out, "DERIVED_incident_recovery_stability_seconds", "12");
     }
 
     private static void appendArchitectureSignals(Context context, StringBuilder out) {
         out.append("\n=== ARCHITECTURE_SIGNALS ===\n");
-        boolean usage = GuardService.hasUsageAccess(context);
+        boolean usage = UsageAccessProbe.hasAccess(context);
         boolean root = context.getSharedPreferences(GuardService.PREFS, Context.MODE_PRIVATE)
                 .getBoolean("root_available", false);
         boolean psi = new File("/proc/pressure/memory").canRead();
         int cores = readableCpuFreqCores();
 
-        signal(out, "foreground_detection", usage ? "KEEP" : "BLOCKED", usage
-                ? "Usage-based adaptive protection can be evaluated"
-                : "Current architecture cannot attribute foreground transitions reliably until Usage Access is granted");
-        signal(out, "root_layer", root ? "AVAILABLE" : "OPTIONAL_UNAVAILABLE", root
-                ? "Root-specific reversible probes may be evaluated"
-                : "Do not make root-only behavior a baseline dependency");
-        signal(out, "memory_pressure_backend", psi ? "KEEP" : "NEEDS_FALLBACK", psi
+        signal(out, "sampler_thread", "KEEP", "sampling is isolated from the Activity main looper");
+        signal(out, "bounded_wakelock", "KEEP", "partial wakelock is held only for the explicit diagnostic session timeout");
+        signal(out, "foreground_detection", usage ? "AVAILABLE" : "DEGRADED", usage
+                ? "foreground package transitions can be correlated"
+                : "system-level incident detection continues without foreground attribution");
+        signal(out, "memory_pressure_backend", psi ? "AVAILABLE" : "FALLBACK_ACTIVE", psi
                 ? "PSI evidence available"
-                : "Add alternative pressure metrics only if reports confirm PSI is unavailable on target firmware");
-        signal(out, "cpu_frequency_backend", cores > 0 ? "KEEP" : "NEEDS_FALLBACK", cores > 0
-                ? "Readable cpufreq cores=" + cores
-                : "Do not infer CPU throttling from frequency until a readable backend exists");
-        signal(out, "gbox_private_observability", "BOUNDARY", "Normal app sandbox is an architectural visibility limit; escalate privileges only when a concrete unresolved hypothesis requires it");
+                : "RAM ratio + lowMemory fallback active; no synthetic PSI zero");
+        signal(out, "cpu_frequency_backend", cores > 0 ? "AVAILABLE" : "DEGRADED", cores > 0
+                ? "readable cpufreq cores=" + cores
+                : "do not attribute freezes to frequency without another readable backend");
+        signal(out, "root_layer", root ? "AVAILABLE" : "OPTIONAL_UNAVAILABLE", root
+                ? "root-only evidence may be added in a later explicit privileged mode"
+                : "baseline diagnostics stay non-root and honest about visibility limits");
     }
 
     private static boolean isInstalled(Context context, String pkg) {
