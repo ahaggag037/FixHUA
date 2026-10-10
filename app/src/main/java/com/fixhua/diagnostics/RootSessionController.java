@@ -3,6 +3,10 @@ package com.fixhua.diagnostics;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Conservative root-only session helper for GBox.
  *
@@ -16,14 +20,21 @@ final class RootSessionController {
     private static final long RECHECK_MS = 30_000L;
 
     private final Context context;
-    private boolean probed;
-    private boolean rootAvailable;
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "FixHUA-RootGuard");
+        t.setDaemon(true);
+        return t;
+    });
+    private final AtomicBoolean taskRunning = new AtomicBoolean(false);
+
+    private volatile boolean probed;
+    private volatile boolean rootAvailable;
+    private volatile boolean applied;
+    private volatile long lastTickAt;
     private boolean snapshotTaken;
     private boolean initiallyWhitelisted;
     private boolean whitelistAddedByUs;
     private String initialStandbyBucket;
-    private boolean applied;
-    private long lastTickAt;
 
     RootSessionController(Context context) {
         this.context = context.getApplicationContext();
@@ -47,28 +58,41 @@ final class RootSessionController {
     void tick(boolean protectWindow) {
         long now = System.currentTimeMillis();
         if (now - lastTickAt < RECHECK_MS && protectWindow == applied) return;
+        if (!taskRunning.compareAndSet(false, true)) return;
         lastTickAt = now;
 
-        if (!probed) {
-            rootAvailable = probeAndStore(context);
-            probed = true;
-        }
-        if (!rootAvailable) {
-            saveStatus("Root غير متاح — الحماية العادية فقط");
-            return;
-        }
+        executor.execute(() -> {
+            try {
+                if (!probed) {
+                    rootAvailable = probeAndStore(context);
+                    probed = true;
+                }
+                if (!rootAvailable) {
+                    saveStatus("Root غير متاح — الحماية العادية فقط");
+                    return;
+                }
 
-        if (protectWindow) {
-            ensureApplied();
-        } else if (applied) {
-            restore();
-        } else {
-            saveStatus("Root جاهز • في انتظار جلسة GBox");
-        }
+                if (protectWindow) {
+                    ensureApplied();
+                } else if (applied) {
+                    restore();
+                } else {
+                    saveStatus("Root جاهز • في انتظار جلسة GBox");
+                }
+            } finally {
+                taskRunning.set(false);
+            }
+        });
     }
 
     void close() {
-        if (rootAvailable && applied) restore();
+        if (rootAvailable && applied) {
+            try {
+                executor.submit(this::restore).get();
+            } catch (Throwable ignored) {
+            }
+        }
+        executor.shutdownNow();
     }
 
     private void ensureSnapshot() {
@@ -138,7 +162,7 @@ final class RootSessionController {
                 .apply();
     }
 
-    private static boolean validBucket(String value) {
+    static boolean validBucket(String value) {
         if (value == null || value.isEmpty()) return false;
         if (value.matches("[0-9]+")) return true;
         return value.equals("active")
