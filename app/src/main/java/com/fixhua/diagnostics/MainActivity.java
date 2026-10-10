@@ -66,14 +66,14 @@ public class MainActivity extends Activity {
         content.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         TextView title = new TextView(this);
-        title.setText("FixHUA Active Guard v2.2");
+        title.setText("FixHUA Root Guard v3");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_HORIZONTAL);
         content.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("نسخة مؤقتة هدفها تحسين جلسة GBox فعليًا: حماية نشطة للـCPU وWi‑Fi أثناء الاستخدام مع تراجع تلقائي عند الضغط الحراري.");
+        subtitle.setText("حماية جلسة GBox بشكل فعلي: طبقة عادية للـCPU/Wi‑Fi، وطبقة Root اختيارية تستخدم صلاحية su الموجودة مسبقًا لتقليل قيود Doze/standby أثناء الجلسة ثم تعيد الحالة السابقة.");
         subtitle.setTextSize(15);
         subtitle.setPadding(0, dp(8), 0, dp(14));
         content.addView(subtitle);
@@ -84,7 +84,11 @@ public class MainActivity extends Activity {
         statusView.setPadding(dp(12), dp(12), dp(12), dp(12));
         content.addView(statusView);
 
-        Button start = button("ابدأ الحماية وافتح GBox");
+        Button rootProbe = button("فحص وتفعيل صلاحية Root المتاحة");
+        rootProbe.setOnClickListener(v -> probeRoot());
+        content.addView(rootProbe);
+
+        Button start = button("ابدأ Root Guard وافتح GBox");
         start.setOnClickListener(v -> startProtected());
         content.addView(start);
 
@@ -108,7 +112,7 @@ public class MainActivity extends Activity {
         reopen.setOnClickListener(v -> launchGBox());
         content.addView(reopen);
 
-        Button stop = button("إيقاف الحماية");
+        Button stop = button("إيقاف الحماية وإرجاع تغييرات الجلسة");
         stop.setOnClickListener(v -> stopGuard());
         content.addView(stop);
 
@@ -117,7 +121,7 @@ public class MainActivity extends Activity {
         content.addView(refresh);
 
         TextView note = new TextView(this);
-        note.setText("ملاحظة: هذه النسخة لا تنظف RAM ولا تقتل التطبيقات ولا تعطل حماية الحرارة. التحسين هنا محدود بآليات أندرويد المسموح بها لهذه النسخة المؤقتة.");
+        note.setText("مهم: FixHUA لا يعمل Root للجهاز ولا يفتح Bootloader. إذا كان su موجودًا بالفعل فإنه يستخدم فقط أوامر داخلية محدودة وقابلة للعكس. لا يعطل حماية الحرارة، ولا يغير هوية الجهاز، ولا يلمس Play Integrity/DRM، ولا ينظف RAM أو يقتل التطبيقات عشوائيًا.");
         note.setTextSize(13);
         note.setPadding(0, dp(12), 0, dp(24));
         content.addView(note);
@@ -147,6 +151,7 @@ public class MainActivity extends Activity {
         StringBuilder b = new StringBuilder();
         b.append("الحماية: ").append(GuardService.active ? "مفعلة ✓" : "متوقفة").append('\n');
         b.append("الوضع: ").append(modeLabel(mode)).append('\n');
+        b.append("Root: ").append(RootSessionController.lastStatus(this)).append('\n');
         b.append("Usage Access: ")
                 .append(GuardService.hasUsageAccess(this) ? "مفعل ✓" : "غير مفعل — تعمل حماية Basic")
                 .append('\n');
@@ -161,6 +166,21 @@ public class MainActivity extends Activity {
         modeButton.setText("وضع الحماية: " + modeLabel(mode) + " — اضغط للتغيير");
     }
 
+    private void probeRoot() {
+        Toast.makeText(this, "سيظهر طلب Root إذا كان su متاحًا", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            boolean root = RootSessionController.probeAndStore(getApplicationContext());
+            runOnUiThread(() -> {
+                Toast.makeText(
+                        MainActivity.this,
+                        root ? "تم تأكيد Root ✓" : "Root غير متاح — سيعمل الوضع العادي",
+                        Toast.LENGTH_LONG
+                ).show();
+                refreshStatus();
+            });
+        }, "FixHUA-RootProbe").start();
+    }
+
     private void startProtected() {
         if (!isInstalled(GBOX)) {
             Toast.makeText(this, "GBox غير مثبت على الهاتف", Toast.LENGTH_LONG).show();
@@ -173,7 +193,7 @@ public class MainActivity extends Activity {
             return;
         }
         statusView.postDelayed(this::launchGBox, 250);
-        statusView.postDelayed(this::refreshStatus, 650);
+        statusView.postDelayed(this::refreshStatus, 850);
     }
 
     private void launchGBox() {
@@ -197,8 +217,8 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
             stopService(new Intent(this, GuardService.class));
         }
-        Toast.makeText(this, "تم إيقاف الحماية", Toast.LENGTH_SHORT).show();
-        statusView.postDelayed(this::refreshStatus, 500);
+        Toast.makeText(this, "تم إيقاف الحماية وسيتم إرجاع تغييرات الجلسة", Toast.LENGTH_SHORT).show();
+        statusView.postDelayed(this::refreshStatus, 900);
     }
 
     private void cycleMode() {
