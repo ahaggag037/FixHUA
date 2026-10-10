@@ -1,0 +1,90 @@
+name: FixHUA Root Feasibility Probe CI
+
+on:
+  push:
+    branches: [ 'build/root-feasibility-probe-v1' ]
+  workflow_dispatch:
+
+jobs:
+  build-root-probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Read-only safety contract
+        run: |
+          SRC=rootprobe/src/main/java/com/fixhua/rootprobe/ProbeCollector.java
+          UI=rootprobe/src/main/java/com/fixhua/rootprobe/MainActivity.java
+          grep -Fq 'mode=READ_ONLY' "$SRC"
+          grep -Fq 'no reboot, no flashing, no bootloader unlock' "$SRC"
+          grep -Fq 'Share report' "$UI"
+          ! grep -Eq 'reboot bootloader|fastboot flashing unlock|fastboot oem unlock|dd if=|dd of=|setprop |/sys/.*/scaling_max_freq' "$SRC" "$UI"
+
+      - name: Lint root probe
+        run: gradle --stacktrace :rootprobe:lintRelease
+
+      - name: Build unsigned root probe
+        run: gradle --stacktrace :rootprobe:assembleRelease
+
+      - name: Create ephemeral signing key and sign APK
+        run: |
+          export SIGN_PASS="$(openssl rand -hex 24)"
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/rootprobe-release.jks" \
+            -storepass "$SIGN_PASS" \
+            -keypass "$SIGN_PASS" \
+            -alias rootprobe \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 10000 \
+            -dname "CN=FixHUA Root Feasibility Probe, OU=Personal Android, O=FixHUA, C=EG" \
+            -storetype PKCS12
+          IN=rootprobe/build/outputs/apk/release/rootprobe-release-unsigned.apk
+          OUT=rootprobe/build/outputs/apk/release/FixHUA-Root-Feasibility-Probe-v1.0.0.apk
+          test -s "$IN"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks "$RUNNER_TEMP/rootprobe-release.jks" \
+            --ks-key-alias rootprobe \
+            --ks-pass env:SIGN_PASS \
+            --key-pass env:SIGN_PASS \
+            "$OUT"
+
+      - name: Verify signed APK
+        run: |
+          APK=rootprobe/build/outputs/apk/release/FixHUA-Root-Feasibility-Probe-v1.0.0.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee rootprobe/build/outputs/apk/release/apksigner.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee rootprobe/build/outputs/apk/release/apk-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee rootprobe/build/outputs/apk/release/apk-permissions.txt
+          sha256sum "$APK" | tee rootprobe/build/outputs/apk/release/FixHUA-Root-Feasibility-Probe-v1.0.0.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FixHUA-Root-Feasibility-Probe-v1.0.0
+          path: |
+            rootprobe/build/outputs/apk/release/FixHUA-Root-Feasibility-Probe-v1.0.0.apk
+            rootprobe/build/outputs/apk/release/FixHUA-Root-Feasibility-Probe-v1.0.0.apk.sha256
+            rootprobe/build/outputs/apk/release/apksigner.txt
+            rootprobe/build/outputs/apk/release/apk-badging.txt
+            rootprobe/build/outputs/apk/release/apk-permissions.txt
+          if-no-files-found: error
