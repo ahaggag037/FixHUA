@@ -1,37 +1,33 @@
-# FixHUA Active Guard v2.2.0
+# FixHUA Auto System Diagnostics v3.3.0
 
-Temporary active-performance build for Huawei + GBox while the long-horizon FixHUA research project is still in progress.
+Android diagnostic + GBox stability utility for the Huawei JLN-LX1 test device.
 
-Target verified by user report:
-- Huawei JLN-LX1 / JLN-L21
-- Android 12 / SDK 31
-- GBox 1.8.4.21
-- GBox battery exemption already enabled
-- healthy RAM/storage/network/thermal snapshot at test time
+## v3.3 focus
 
-## Goal
+This build replaces manual lag marking with automatic incident detection and fixes the diagnostic session reliability problems found in the previous report.
 
-Improve the live GBox session instead of replacing performance work with diagnostics.
+- sampling runs on a dedicated `HandlerThread`, not the Activity/main looper
+- a bounded partial wakelock is held only during the explicit diagnostic session
+- normal sampling is 1 Hz; suspected/active/recovering incidents temporarily use 2 Hz
+- automatic state machine: `NORMAL -> SUSPECTED -> INCIDENT -> RECOVERY -> NORMAL`
+- recovery must remain stable for 12 seconds before an incident closes
+- scheduler lateness and sample gaps are recorded so a stalled FixHUA service becomes evidence rather than missing data
+- memory/I/O PSI unavailable is represented as `NA`/`UNAVAILABLE`, never a fake zero
+- CPU frequency drops only gain incident weight when paired with meaningful CPU load or other pressure signals
+- Usage Access has a vendor-tolerant self-test and foreground package correlation
+- final report is built automatically when the session ends and a notification announces success/failure
+- the manual “lag now” button is removed
 
-The guard uses an explicit foreground service with bounded CPU and Wi-Fi performance locks. With Usage Access enabled it focuses protection around actual GBox foreground/recent activity. It automatically backs off Wi-Fi boosting on thermal pressure and disables all locks at severe thermal status.
+## Visibility boundary
 
-Modes:
-- Balanced: CPU-awake protection around the GBox window + high-performance Wi-Fi when conditions are good.
-- Stability: stronger session protection + low-latency Wi-Fi while cool, degrading to high-performance mode as temperature rises.
-- Eco: minimal foreground-only CPU-awake protection, no Wi-Fi boost.
+Without Root/ADB, Android does not allow a normal app to inspect every driver, Binder call, service, process, private log, or another app's rendering pipeline. FixHUA records the broadest read-only device evidence available to its granted APIs and marks missing sources honestly.
 
-## What it deliberately does not do
+When Usage Access is granted, foreground package names may be recorded for attribution. App content, messages, photos, contacts, precise location, Android ID, serial, IP addresses, and passwords are not collected.
 
-- no RAM cleaner
-- no blind process killing
-- no thermal-safety disabling
-- no device-property spoofing
-- no Play Integrity / banking / DRM bypass
-- no unrestricted root shell
-- no persistent kernel/sysfs writes
+## Safety
+
+FixHUA does not root the phone, unlock the bootloader, disable thermal protection, bypass Play Integrity/DRM, blindly kill processes, or make persistent kernel/sysfs writes.
 
 ## Branch
 
-`build/v2.2-active-guard`
-
-This build is intentionally separate from the clean v2 diagnostic rewrite and from the long-horizon research repositories.
+`build/v3.3-auto-system-diagnostics`
