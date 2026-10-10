@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "FixHUA"
 include(":app")
+include(":rootprobe")
