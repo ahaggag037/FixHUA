@@ -32,6 +32,14 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: UI diagnostic wiring contract
+        run: |
+          grep -q 'toggleDeepDiagnostics' app/src/main/java/com/fixhua/diagnostics/MainActivity.java
+          grep -q 'markLagNow' app/src/main/java/com/fixhua/diagnostics/MainActivity.java
+          grep -q 'generateAndCopyReport' app/src/main/java/com/fixhua/diagnostics/MainActivity.java
+          grep -q 'android:name=".DeepDiagnosticService"' app/src/main/AndroidManifest.xml
+          grep -q 'versionName = "3.2.0"' app/build.gradle.kts
+
       - name: Unit tests
         run: gradle --stacktrace testDebugUnitTest
 
@@ -57,7 +65,7 @@ jobs:
       - name: Align and sign release APK
         run: |
           IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-RootGuard-v3.0.0.apk
+          OUT=app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
@@ -69,19 +77,19 @@ jobs:
 
       - name: Verify release APK
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-RootGuard-v3.0.0.apk
+          APK=app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -60 | tee app/build/outputs/apk/release/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-RootGuard-v3.0.0.apk.sha256
+          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-RootGuard-v3.0.0-release
+          name: FixHUA-RootGuard-v3.2.0-release
           path: |
-            app/build/outputs/apk/release/FixHUA-RootGuard-v3.0.0.apk
-            app/build/outputs/apk/release/FixHUA-RootGuard-v3.0.0.apk.sha256
+            app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk
+            app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk.sha256
             app/build/outputs/apk/release/apksigner.txt
             app/build/outputs/apk/release/apk-badging.txt
             app/build/outputs/apk/release/apk-permissions.txt
