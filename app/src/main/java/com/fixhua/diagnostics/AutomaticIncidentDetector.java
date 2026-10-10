@@ -72,7 +72,8 @@ final class AutomaticIncidentDetector {
         Score scored = score(in);
         int score = scored.value;
         boolean suspicious = score >= 3;
-        boolean strong = score >= 6;
+        boolean hardSamplerStall = in.samplerLateMs >= 1_200L;
+        boolean strong = score >= 6 || hardSamplerStall;
         boolean calm = score <= 1;
         Transition transition = Transition.NONE;
 
@@ -107,7 +108,7 @@ final class AutomaticIncidentDetector {
                 }
                 break;
             case RECOVERY:
-                if (suspicious) {
+                if (suspicious || hardSamplerStall) {
                     state = State.INCIDENT;
                     stateSinceMs = in.nowElapsedMs;
                 } else if (calm && in.nowElapsedMs - stateSinceMs >= 12_000L) {
@@ -133,7 +134,7 @@ final class AutomaticIncidentDetector {
         int value = 0;
         List<String> reasons = new ArrayList<>();
 
-        if (in.samplerLateMs >= 1_200L) { value += 6; reasons.add("sampler_late>=1200ms"); }
+        if (in.samplerLateMs >= 1_200L) { value += 4; reasons.add("sampler_late>=1200ms"); }
         else if (in.samplerLateMs >= 600L) { value += 3; reasons.add("sampler_late>=600ms"); }
         else if (in.samplerLateMs >= 250L) { value += 1; reasons.add("sampler_late>=250ms"); }
 
