@@ -3,6 +3,8 @@ package com.fixhua.diagnostics;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -21,11 +23,16 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
 public class MainActivity extends Activity {
     private static final String GBOX = "com.gbox.android";
 
     private TextView statusView;
     private Button modeButton;
+    private Button diagnosticButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,14 +73,14 @@ public class MainActivity extends Activity {
         content.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         TextView title = new TextView(this);
-        title.setText("FixHUA Root Guard v3");
+        title.setText("FixHUA Root Guard v3.2");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER_HORIZONTAL);
         content.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("حماية جلسة GBox بشكل فعلي: طبقة عادية للـCPU/Wi‑Fi، وطبقة Root اختيارية تستخدم صلاحية su الموجودة مسبقًا لتقليل قيود Doze/standby أثناء الجلسة ثم تعيد الحالة السابقة.");
+        subtitle.setText("حماية GBox + تشخيص لحظي قابل للنسخ. جلسة التشخيص تقرأ مؤشرات الذاكرة/PSI وCPU والحرارة والبطارية والشبكة كل ثانية، وزر التهنيجة يضع علامة زمنية دقيقة داخل السجل.");
         subtitle.setTextSize(15);
         subtitle.setPadding(0, dp(8), 0, dp(14));
         content.addView(subtitle);
@@ -112,6 +119,18 @@ public class MainActivity extends Activity {
         reopen.setOnClickListener(v -> launchGBox());
         content.addView(reopen);
 
+        diagnosticButton = button("");
+        diagnosticButton.setOnClickListener(v -> toggleDeepDiagnostics());
+        content.addView(diagnosticButton);
+
+        Button lagMarker = button("حصلت تهنيجة الآن — ضع علامة زمنية");
+        lagMarker.setOnClickListener(v -> markLagNow());
+        content.addView(lagMarker);
+
+        Button report = button("إنشاء ونسخ تقرير الحالة الكامل");
+        report.setOnClickListener(v -> generateAndCopyReport(report));
+        content.addView(report);
+
         Button stop = button("إيقاف الحماية وإرجاع تغييرات الجلسة");
         stop.setOnClickListener(v -> stopGuard());
         content.addView(stop);
@@ -121,7 +140,7 @@ public class MainActivity extends Activity {
         content.addView(refresh);
 
         TextView note = new TextView(this);
-        note.setText("مهم: FixHUA لا يعمل Root للجهاز ولا يفتح Bootloader. إذا كان su موجودًا بالفعل فإنه يستخدم فقط أوامر داخلية محدودة وقابلة للعكس. لا يعطل حماية الحرارة، ولا يغير هوية الجهاز، ولا يلمس Play Integrity/DRM، ولا ينظف RAM أو يقتل التطبيقات عشوائيًا.");
+        note.setText("الخصوصية: تقرير FixHUA لا يجمع الحسابات أو الرسائل أو الصور أو جهات الاتصال أو الموقع أو Android ID أو الرقم التسلسلي أو IP أو كلمات السر. FixHUA لا يعمل Root للجهاز ولا يفتح Bootloader، ولا يعطل حماية الحرارة، ولا يلمس Play Integrity/DRM.");
         note.setTextSize(13);
         note.setPadding(0, dp(12), 0, dp(24));
         content.addView(note);
@@ -162,8 +181,15 @@ public class MainActivity extends Activity {
         b.append("الجلسات: ").append(GuardService.stat(this, "sessions")).append('\n');
         b.append("وقت الحماية الكلي: ").append(formatDuration(GuardService.stat(this, "total_guard_ms"))).append('\n');
         b.append("آخر peak thermal: ").append(GuardService.stat(this, "last_peak_thermal")).append('\n');
+        b.append("التشخيص اللحظي: ").append(DeepDiagnosticService.active ? "يعمل ✓" : "متوقف").append('\n');
+        b.append("عينات التشخيص: ").append(DeepDiagnosticService.sampleCount(this)).append('\n');
+        long diagStarted = DeepDiagnosticService.startedAt(this);
+        if (diagStarted > 0L) b.append("بدأ التشخيص: ").append(formatTimestamp(diagStarted)).append('\n');
         statusView.setText(b.toString());
         modeButton.setText("وضع الحماية: " + modeLabel(mode) + " — اضغط للتغيير");
+        diagnosticButton.setText(DeepDiagnosticService.active
+                ? "إيقاف جلسة التشخيص وحفظ السجل"
+                : "ابدأ جلسة تشخيص دقيقة (قراءة كل ثانية)");
     }
 
     private void probeRoot() {
@@ -208,6 +234,65 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             Toast.makeText(this, "فشل فتح GBox: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void toggleDeepDiagnostics() {
+        if (DeepDiagnosticService.active) {
+            Intent stop = new Intent(this, DeepDiagnosticService.class).setAction(DeepDiagnosticService.ACTION_STOP);
+            try {
+                startService(stop);
+            } catch (Throwable t) {
+                stopService(new Intent(this, DeepDiagnosticService.class));
+            }
+            Toast.makeText(this, "تم إيقاف جلسة التشخيص وحفظ السجل", Toast.LENGTH_SHORT).show();
+            statusView.postDelayed(this::refreshStatus, 500);
+            return;
+        }
+        try {
+            startForegroundService(new Intent(this, DeepDiagnosticService.class));
+            Toast.makeText(this, "بدأ التشخيص: قراءة كل ثانية لمدة أقصاها 20 دقيقة", Toast.LENGTH_LONG).show();
+            statusView.postDelayed(this::refreshStatus, 600);
+        } catch (Throwable t) {
+            Toast.makeText(this, "تعذر بدء التشخيص: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void markLagNow() {
+        DiagnosticTimeline.recordEvent(this, "user_lag_marker", "user_pressed_lag_marker_now");
+        if (DeepDiagnosticService.active) {
+            Toast.makeText(this, "تم تسجيل لحظة التهنيج ✓ — استمر قليلًا قبل إيقاف التشخيص", Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "تم تسجيل العلامة، لكن جلسة التشخيص غير مفعلة؛ شغّلها للحصول على عينات قبل/بعد المشكلة", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void generateAndCopyReport(Button reportButton) {
+        reportButton.setEnabled(false);
+        reportButton.setText("جارٍ إنشاء التقرير…");
+        DiagnosticTimeline.recordEvent(this, "report_requested", "user_requested_copyable_report");
+        new Thread(() -> {
+            try {
+                String report = DiagnosticBundle.build(getApplicationContext());
+                runOnUiThread(() -> {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard == null) {
+                        Toast.makeText(MainActivity.this, "تعذر الوصول إلى الحافظة", Toast.LENGTH_LONG).show();
+                    } else {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("FixHUA diagnostic report", report));
+                        Toast.makeText(MainActivity.this, "تم إنشاء التقرير ونسخه للحافظة ✓ — الصقه وأرسله لي", Toast.LENGTH_LONG).show();
+                    }
+                    reportButton.setEnabled(true);
+                    reportButton.setText("إنشاء ونسخ تقرير الحالة الكامل");
+                    refreshStatus();
+                });
+            } catch (Throwable t) {
+                runOnUiThread(() -> {
+                    reportButton.setEnabled(true);
+                    reportButton.setText("إنشاء ونسخ تقرير الحالة الكامل");
+                    Toast.makeText(MainActivity.this, "فشل إنشاء التقرير: " + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "FixHUA-ReportBuilder").start();
     }
 
     private void stopGuard() {
@@ -289,6 +374,7 @@ public class MainActivity extends Activity {
             try {
                 startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
             } catch (Throwable ignored) {
+                Toast.makeText(this, "تعذر فتح إعدادات البطارية على هذا النظام", Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -312,7 +398,9 @@ public class MainActivity extends Activity {
         }
         try {
             startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            Toast.makeText(this, "لم أجد مدير Huawei المباشر؛ فتحت إعدادات البطارية العامة بدلًا منه", Toast.LENGTH_LONG).show();
         } catch (Throwable ignored) {
+            Toast.makeText(this, "تعذر فتح إعدادات الخلفية على هذا الإصدار", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -320,6 +408,10 @@ public class MainActivity extends Activity {
         long minutes = Math.max(0L, ms / 60_000L);
         if (minutes < 60L) return minutes + " دقيقة";
         return (minutes / 60L) + "س " + (minutes % 60L) + "د";
+    }
+
+    private String formatTimestamp(long epochMs) {
+        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(epochMs));
     }
 
     private int dp(int value) {
