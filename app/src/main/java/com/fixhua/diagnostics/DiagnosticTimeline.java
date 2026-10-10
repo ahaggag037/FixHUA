@@ -121,12 +121,13 @@ final class DiagnosticTimeline {
     static synchronized String report(Context context, int maxLines) {
         StringBuilder out = new StringBuilder();
         out.append("\n=== DEEP DIAGNOSTIC TIMELINE ===\n");
-        out.append("Sampling interval: GuardService tick (~5 s while protection is active).\n");
+        out.append("Sampling cadence: mode=deep_test is 1 Hz while the user-started Deep Diagnostic Service is active; GuardService samples are approximately every 5 s while protection is active.\n");
+        out.append("User lag markers appear as event=user_lag_marker and should be correlated with samples immediately before and after the marker.\n");
         out.append("Interpretation rule: likelyCause is correlation-based, not proof of root cause.\n");
         out.append("Metric paths: CPU=/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq (fallback cpuinfo_cur_freq); memory PSI=/proc/pressure/memory; RAM=ActivityManager.MemoryInfo; thermal=PowerManager; battery=BatteryManager; network=ConnectivityManager.\n");
         File f = new File(context.getFilesDir(), FILE_NAME);
         if (!f.canRead()) {
-            out.append("No timeline samples recorded yet. Start Root Guard, reproduce the issue, then generate the report.\n");
+            out.append("No timeline samples recorded yet. Start the deep diagnostic session, reproduce the issue, press the lag marker when it occurs, then generate the report.\n");
             return out.toString();
         }
 
