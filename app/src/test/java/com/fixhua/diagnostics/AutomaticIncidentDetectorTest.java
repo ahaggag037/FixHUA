@@ -39,6 +39,17 @@ public class AutomaticIncidentDetectorTest {
     }
 
     @Test
+    public void hardSamplerStallStartsIncidentWithoutSecondSample() {
+        AutomaticIncidentDetector d = new AutomaticIncidentDetector();
+        AutomaticIncidentDetector.Result r = d.update(input(
+                1_000, 1_250, 0.50, false, false, Double.NaN, Double.NaN,
+                false, Double.NaN, 0.20, 0.0, 0));
+        assertEquals(AutomaticIncidentDetector.State.INCIDENT, r.state);
+        assertEquals(AutomaticIncidentDetector.Transition.INCIDENT_STARTED, r.transition);
+        assertTrue(r.incidentId > 0L);
+    }
+
+    @Test
     public void strongMultiSignalStallStartsIncidentImmediately() {
         AutomaticIncidentDetector d = new AutomaticIncidentDetector();
         AutomaticIncidentDetector.Result r = d.update(input(
