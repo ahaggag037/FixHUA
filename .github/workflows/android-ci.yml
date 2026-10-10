@@ -32,13 +32,23 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: UI diagnostic wiring contract
+      - name: UI button wiring contract
         run: |
-          grep -q 'toggleDeepDiagnostics' app/src/main/java/com/fixhua/diagnostics/MainActivity.java
-          grep -q 'markLagNow' app/src/main/java/com/fixhua/diagnostics/MainActivity.java
-          grep -q 'generateAndCopyReport' app/src/main/java/com/fixhua/diagnostics/MainActivity.java
-          grep -q 'android:name=".DeepDiagnosticService"' app/src/main/AndroidManifest.xml
-          grep -q 'versionName = "3.2.0"' app/build.gradle.kts
+          FILE=app/src/main/java/com/fixhua/diagnostics/MainActivity.java
+          grep -Fq 'rootProbe.setOnClickListener(v -> probeRoot());' "$FILE"
+          grep -Fq 'start.setOnClickListener(v -> startProtected());' "$FILE"
+          grep -Fq 'modeButton.setOnClickListener(v -> cycleMode());' "$FILE"
+          grep -Fq 'usage.setOnClickListener(v -> openUsageAccess());' "$FILE"
+          grep -Fq 'huawei.setOnClickListener(v -> openHuaweiStartupManager());' "$FILE"
+          grep -Fq 'battery.setOnClickListener(v -> requestOwnBatteryExemption());' "$FILE"
+          grep -Fq 'reopen.setOnClickListener(v -> launchGBox());' "$FILE"
+          grep -Fq 'diagnosticButton.setOnClickListener(v -> toggleDeepDiagnostics());' "$FILE"
+          grep -Fq 'lagMarker.setOnClickListener(v -> markLagNow());' "$FILE"
+          grep -Fq 'report.setOnClickListener(v -> generateAndCopyReport(report));' "$FILE"
+          grep -Fq 'stop.setOnClickListener(v -> stopGuard());' "$FILE"
+          grep -Fq 'refresh.setOnClickListener(v -> refreshStatus());' "$FILE"
+          grep -Fq 'android:name=".DeepDiagnosticService"' app/src/main/AndroidManifest.xml
+          grep -Fq 'versionName = "3.2.0"' app/build.gradle.kts
 
       - name: Unit tests
         run: gradle --stacktrace testDebugUnitTest
