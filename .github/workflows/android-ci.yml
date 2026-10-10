@@ -1,4 +1,4 @@
-name: FixHUA Android CI
+name: FixHUA Diagnostic Probe CI
 
 on:
   push:
@@ -41,48 +41,50 @@ jobs:
       - name: Build unsigned release APK
         run: gradle --stacktrace assembleRelease
 
-      - name: Create temporary release signing key
+      - name: Create temporary diagnostic signing key
         run: |
           keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/fixhua-v2-release.jks" \
-            -storepass "FixHUA-V2-CI-2026" \
-            -keypass "FixHUA-V2-CI-2026" \
-            -alias fixhua-v2 \
+            -keystore "$RUNNER_TEMP/fixhua-probe.jks" \
+            -storepass "FixHUA-Probe-CI-2026" \
+            -keypass "FixHUA-Probe-CI-2026" \
+            -alias fixhua-probe \
             -keyalg RSA \
             -keysize 3072 \
             -validity 10000 \
-            -dname "CN=FixHUA v2, OU=Personal Android, O=FixHUA, C=EG" \
+            -dname "CN=FixHUA Diagnostic Probe, OU=Personal Android, O=FixHUA, C=EG" \
             -storetype PKCS12
 
       - name: Align and sign release APK
         run: |
           IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          OUT=app/build/outputs/apk/release/FixHUA-Diagnostic-Probe-v3.0.0.apk
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
-            --ks "$RUNNER_TEMP/fixhua-v2-release.jks" \
-            --ks-key-alias fixhua-v2 \
-            --ks-pass pass:FixHUA-V2-CI-2026 \
-            --key-pass pass:FixHUA-V2-CI-2026 \
+            --ks "$RUNNER_TEMP/fixhua-probe.jks" \
+            --ks-key-alias fixhua-probe \
+            --ks-pass pass:FixHUA-Probe-CI-2026 \
+            --key-pass pass:FixHUA-Probe-CI-2026 \
             "$OUT"
 
       - name: Verify APK identity, signature, and permission surface
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          APK=app/build/outputs/apk/release/FixHUA-Diagnostic-Probe-v3.0.0.apk
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
-          grep -q "package: name='com.fixhua.guard' versionCode='20' versionName='2.0.0'" app/build/outputs/apk/release/apk-badging.txt
+          grep -q "package: name='com.fixhua.probe' versionCode='30' versionName='3.0.0'" app/build/outputs/apk/release/apk-badging.txt
           grep -q "android.permission.ACCESS_NETWORK_STATE" app/build/outputs/apk/release/apk-permissions.txt
-          for forbidden in WAKE_LOCK KILL_BACKGROUND_PROCESSES FOREGROUND_SERVICE POST_NOTIFICATIONS PACKAGE_USAGE_STATS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS CHANGE_WIFI_STATE; do
+          grep -q "android.permission.PACKAGE_USAGE_STATS" app/build/outputs/apk/release/apk-permissions.txt
+          grep -q "android.permission.QUERY_ALL_PACKAGES" app/build/outputs/apk/release/apk-permissions.txt
+          for forbidden in INTERNET READ_LOGS DUMP MANAGE_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE READ_PHONE_STATE ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION REQUEST_INSTALL_PACKAGES SYSTEM_ALERT_WINDOW REQUEST_IGNORE_BATTERY_OPTIMIZATIONS KILL_BACKGROUND_PROCESSES; do
             if grep -q "android.permission.$forbidden" app/build/outputs/apk/release/apk-permissions.txt; then
-              echo "Forbidden legacy permission present: $forbidden"
+              echo "Unexpected permission present: $forbidden"
               exit 1
             fi
           done
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-Diagnostic-Probe-v3.0.0.apk.sha256
 
       - name: Enable KVM for Android 12 smoke test
         run: |
@@ -100,21 +102,21 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            adb install -r app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+            adb install -r app/build/outputs/apk/release/FixHUA-Diagnostic-Probe-v3.0.0.apk
             adb logcat -c
-            adb shell am force-stop com.fixhua.guard
-            adb shell am start -W -n com.fixhua.guard/.MainActivity | tee app/build/outputs/apk/release/smoke-start.txt
+            adb shell am force-stop com.fixhua.probe
+            adb shell am start -W -n com.fixhua.probe/com.fixhua.guard.MainActivity | tee app/build/outputs/apk/release/smoke-start.txt
             sleep 4
-            adb shell pidof com.fixhua.guard | grep -Eq '[0-9]+'
-            adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.MainActivity"
-            test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.fixhua.guard' || true)"
+            adb shell pidof com.fixhua.probe | grep -Eq '[0-9]+'
+            adb shell dumpsys activity activities | grep -F "com.fixhua.guard.MainActivity"
+            test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.fixhua.probe' || true)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-v2.0.0-release
+          name: FixHUA-Diagnostic-Probe-v3.0.0-release
           path: |
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+            app/build/outputs/apk/release/FixHUA-Diagnostic-Probe-v3.0.0.apk
+            app/build/outputs/apk/release/FixHUA-Diagnostic-Probe-v3.0.0.apk.sha256
             app/build/outputs/apk/release/apksigner.txt
             app/build/outputs/apk/release/apk-badging.txt
             app/build/outputs/apk/release/apk-permissions.txt

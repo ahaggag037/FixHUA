@@ -16,8 +16,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:text="FixHUA 2"
-            android:textSize="28sp"
+            android:text="FixHUA Diagnostic Probe 3"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView
@@ -25,7 +25,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:gravity="center"
-            android:text="Compatibility &amp; Stability Manager"
+            android:text="Huawei / GBox / System Diagnostics"
             android:textSize="14sp" />
 
         <TextView
@@ -40,12 +40,31 @@
             android:textStyle="bold" />
 
         <Button
-            android:id="@+id/checkNow"
+            android:id="@+id/shareReport"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:minHeight="58dp"
+            android:text="إنشاء ومشاركة حزمة التشخيص ZIP"
+            android:textAllCaps="false"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/usageAccess"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="فحص الجهاز الآن"
+            android:text="منح Usage Access لتحليل نشاط GBox"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/checkNow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="52dp"
+            android:text="فحص الاستقرار الآن"
             android:textAllCaps="false" />
 
         <Button
@@ -102,15 +121,6 @@
             android:text="معلومات تطبيق GBox"
             android:textAllCaps="false" />
 
-        <Button
-            android:id="@+id/shareReport"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:minHeight="52dp"
-            android:text="مشاركة التقرير"
-            android:textAllCaps="false" />
-
         <TextView
             android:id="@+id/findings"
             android:layout_width="match_parent"
@@ -125,7 +135,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:paddingBottom="24dp"
-            android:text="ملاحظة: FixHUA لا يغيّر هوية الجهاز ولا يتجاوز فحوص الأمان، ولا يعتبر غياب Google Services Framework على النظام المضيف خطأً بحد ذاته عند استخدام GBox."
+            android:text="هذه النسخة للقراءة والتشخيص فقط، لا تعدّل النظام ولا ترفع البيانات تلقائيًا."
             android:textSize="13sp" />
 
     </LinearLayout>

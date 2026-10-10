@@ -7,11 +7,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.fixhua.guard"
+        applicationId = "com.fixhua.probe"
         minSdk = 29
         targetSdk = 35
-        versionCode = 20
-        versionName = "2.0.0"
+        versionCode = 30
+        versionName = "3.0.0"
     }
 
     buildTypes {
@@ -32,5 +32,6 @@ android {
 }
 
 dependencies {
+    implementation("androidx.core:core:1.15.0")
     testImplementation("junit:junit:4.13.2")
 }
