@@ -1,4 +1,4 @@
-name: FixHUA Root Guard Android CI
+name: FixHUA Auto System Diagnostics Android CI
 
 on:
   push:
@@ -32,23 +32,23 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: UI button wiring contract
+      - name: Automatic diagnostics contract
         run: |
-          FILE=app/src/main/java/com/fixhua/diagnostics/MainActivity.java
-          grep -Fq 'rootProbe.setOnClickListener(v -> probeRoot());' "$FILE"
-          grep -Fq 'start.setOnClickListener(v -> startProtected());' "$FILE"
-          grep -Fq 'modeButton.setOnClickListener(v -> cycleMode());' "$FILE"
-          grep -Fq 'usage.setOnClickListener(v -> openUsageAccess());' "$FILE"
-          grep -Fq 'huawei.setOnClickListener(v -> openHuaweiStartupManager());' "$FILE"
-          grep -Fq 'battery.setOnClickListener(v -> requestOwnBatteryExemption());' "$FILE"
-          grep -Fq 'reopen.setOnClickListener(v -> launchGBox());' "$FILE"
-          grep -Fq 'diagnosticButton.setOnClickListener(v -> toggleDeepDiagnostics());' "$FILE"
-          grep -Fq 'lagMarker.setOnClickListener(v -> markLagNow());' "$FILE"
-          grep -Fq 'report.setOnClickListener(v -> generateAndCopyReport(report));' "$FILE"
-          grep -Fq 'stop.setOnClickListener(v -> stopGuard());' "$FILE"
-          grep -Fq 'refresh.setOnClickListener(v -> refreshStatus());' "$FILE"
+          UI=app/src/main/java/com/fixhua/diagnostics/MainActivity.java
+          SVC=app/src/main/java/com/fixhua/diagnostics/DeepDiagnosticService.java
+          TL=app/src/main/java/com/fixhua/diagnostics/DiagnosticTimeline.java
+          grep -Fq 'diagnosticButton.setOnClickListener(v -> toggleDeepDiagnostics());' "$UI"
+          grep -Fq 'copyReportButton.setOnClickListener(v -> copyLatestReport());' "$UI"
+          ! grep -Fq 'user_lag_marker' "$UI"
+          ! grep -Fq 'markLagNow' "$UI"
+          grep -Fq 'new HandlerThread("FixHUA-DiagnosticSampler"' "$SVC"
+          grep -Fq 'PowerManager.PARTIAL_WAKE_LOCK' "$SVC"
+          grep -Fq 'AutomaticIncidentDetector' "$SVC"
+          grep -Fq 'RESULT_CHANNEL' "$SVC"
+          grep -Fq 'memoryPsiAvailable=' "$TL"
+          grep -Fq 'sampleGapMs=' "$TL"
+          grep -Fq 'versionName = "3.3.0"' app/build.gradle.kts
           grep -Fq 'android:name=".DeepDiagnosticService"' app/src/main/AndroidManifest.xml
-          grep -Fq 'versionName = "3.2.0"' app/build.gradle.kts
 
       - name: Unit tests
         run: gradle --stacktrace testDebugUnitTest
@@ -59,47 +59,45 @@ jobs:
       - name: Build unsigned release APK
         run: gradle --stacktrace assembleRelease
 
-      - name: Create temporary release signing key
+      - name: Create ephemeral key and sign release APK
         run: |
+          export SIGN_PASS="$(openssl rand -hex 24)"
           keytool -genkeypair -v \
             -keystore "$RUNNER_TEMP/fixhua-release.jks" \
-            -storepass "FixHUA-CI-2026" \
-            -keypass "FixHUA-CI-2026" \
+            -storepass "$SIGN_PASS" \
+            -keypass "$SIGN_PASS" \
             -alias fixhua \
             -keyalg RSA \
             -keysize 3072 \
             -validity 10000 \
-            -dname "CN=FixHUA Root Guard, OU=Personal Android, O=FixHUA, C=EG" \
+            -dname "CN=FixHUA Auto System Diagnostics, OU=Personal Android, O=FixHUA, C=EG" \
             -storetype PKCS12
-
-      - name: Align and sign release APK
-        run: |
           IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk
+          OUT=app/build/outputs/apk/release/FixHUA-AutoSystem-v3.3.0.apk
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
             --ks "$RUNNER_TEMP/fixhua-release.jks" \
             --ks-key-alias fixhua \
-            --ks-pass pass:FixHUA-CI-2026 \
-            --key-pass pass:FixHUA-CI-2026 \
+            --ks-pass env:SIGN_PASS \
+            --key-pass env:SIGN_PASS \
             "$OUT"
 
       - name: Verify release APK
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk
+          APK=app/build/outputs/apk/release/FixHUA-AutoSystem-v3.3.0.apk
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -60 | tee app/build/outputs/apk/release/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk.sha256
+          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-AutoSystem-v3.3.0.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-RootGuard-v3.2.0-release
+          name: FixHUA-AutoSystem-v3.3.0-release
           path: |
-            app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk
-            app/build/outputs/apk/release/FixHUA-RootGuard-v3.2.0.apk.sha256
+            app/build/outputs/apk/release/FixHUA-AutoSystem-v3.3.0.apk
+            app/build/outputs/apk/release/FixHUA-AutoSystem-v3.3.0.apk.sha256
             app/build/outputs/apk/release/apksigner.txt
             app/build/outputs/apk/release/apk-badging.txt
             app/build/outputs/apk/release/apk-permissions.txt
