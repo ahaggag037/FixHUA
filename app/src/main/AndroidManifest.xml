@@ -22,7 +22,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="FixHUA Root Guard"
+        android:label="FixHUA Auto System Diagnostics"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
@@ -52,7 +52,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Explicit user-started read-only 1 Hz diagnostic capture for memory, CPU frequency, thermal, battery and network correlation around user-marked lag events" />
+                android:value="Explicit user-started device-wide read-only diagnostic session with automatic incident detection, bounded partial wakelock, adaptive sampling and completion report notification" />
         </service>
     </application>
 
