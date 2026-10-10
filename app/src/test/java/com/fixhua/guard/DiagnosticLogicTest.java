@@ -41,6 +41,17 @@ public class DiagnosticLogicTest {
         assertEquals(DiagnosticLogic.RootSignal.POSSIBLE, r.signal);
     }
 
+    @Test public void mountOverlayAloneIsNotStrongRootEvidence() {
+        Map<String,String> p = new HashMap<>();
+        p.put("ro.build.tags", "release-keys");
+        p.put("ro.build.type", "user");
+        p.put("ro.debuggable", "0");
+        p.put("ro.secure", "1");
+        DiagnosticLogic.RootAssessment r = DiagnosticLogic.assessRoot(p, false, false, true, false);
+        assertEquals(DiagnosticLogic.RootSignal.POSSIBLE, r.signal);
+        assertTrue(r.evidence.get(0).contains("mount"));
+    }
+
     @Test public void cleanSignalsRemainNoneObvious() {
         Map<String,String> p = new HashMap<>();
         p.put("ro.build.tags", "release-keys");
