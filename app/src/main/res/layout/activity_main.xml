@@ -7,16 +7,17 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layoutDirection="rtl"
         android:orientation="vertical"
-        android:padding="20dp"
-        android:layoutDirection="rtl">
+        android:padding="20dp">
 
         <TextView
             android:id="@+id/title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:accessibilityHeading="true"
             android:gravity="center"
-            android:text="FixHUA 2"
+            android:text="@string/app_name"
             android:textSize="28sp"
             android:textStyle="bold" />
 
@@ -25,7 +26,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:gravity="center"
-            android:text="Compatibility &amp; Stability Manager"
+            android:text="@string/subtitle"
             android:textSize="14sp" />
 
         <TextView
@@ -34,10 +35,18 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
             android:padding="14dp"
-            android:text="جاري الفحص…"
+            android:text="@string/scanning"
             android:textIsSelectable="true"
             android:textSize="16sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/scanMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:text="@string/scanning"
+            android:textSize="12sp" />
 
         <Button
             android:id="@+id/checkNow"
@@ -45,7 +54,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:minHeight="52dp"
-            android:text="فحص الجهاز الآن"
+            android:text="@string/check_now"
             android:textAllCaps="false" />
 
         <Button
@@ -54,7 +63,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="إصلاح أهم مشكلة"
+            android:text="@string/fix_most_important"
             android:textAllCaps="false" />
 
         <Button
@@ -63,7 +72,16 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="فحص ثم تشغيل GBox"
+            android:text="@string/launch_gbox_preflight"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/captureIncident"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="@string/capture_incident"
             android:textAllCaps="false" />
 
         <Button
@@ -72,7 +90,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="مركز إصلاح GBox"
+            android:text="@string/recovery_center"
             android:textAllCaps="false" />
 
         <Button
@@ -81,7 +99,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="إعدادات Huawei للعمل في الخلفية"
+            android:text="@string/huawei_background_settings"
             android:textAllCaps="false" />
 
         <Button
@@ -90,7 +108,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="إعدادات تحسين البطارية"
+            android:text="@string/battery_optimization_settings"
             android:textAllCaps="false" />
 
         <Button
@@ -99,7 +117,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="معلومات تطبيق GBox"
+            android:text="@string/gbox_app_info"
             android:textAllCaps="false" />
 
         <Button
@@ -108,7 +126,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:minHeight="52dp"
-            android:text="مشاركة التقرير"
+            android:text="@string/share_report"
             android:textAllCaps="false" />
 
         <TextView
@@ -116,7 +134,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:text=""
             android:textIsSelectable="true"
             android:textSize="15sp" />
 
@@ -125,7 +142,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:paddingBottom="24dp"
-            android:text="ملاحظة: FixHUA لا يغيّر هوية الجهاز ولا يتجاوز فحوص الأمان، ولا يعتبر غياب Google Services Framework على النظام المضيف خطأً بحد ذاته عند استخدام GBox."
+            android:text="@string/footer_note"
             android:textSize="13sp" />
 
     </LinearLayout>
