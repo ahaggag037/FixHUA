@@ -461,8 +461,13 @@ final class DiagnosticCollector {
 
     private static String installer(PackageManager pm, String pkg) {
         try {
-            InstallSourceInfo i = pm.getInstallSourceInfo(pkg);
-            String s = i.getInstallingPackageName();
+            String s;
+            if (Build.VERSION.SDK_INT >= 30) {
+                InstallSourceInfo i = pm.getInstallSourceInfo(pkg);
+                s = i.getInstallingPackageName();
+            } else {
+                s = pm.getInstallerPackageName(pkg);
+            }
             return s == null ? "unknown" : s;
         } catch (Exception e) { return "unavailable:" + e.getClass().getSimpleName(); }
     }
