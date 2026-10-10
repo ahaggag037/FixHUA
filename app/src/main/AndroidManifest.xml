@@ -22,7 +22,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="FixHUA Active Guard"
+        android:label="FixHUA Root Guard"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
@@ -43,7 +43,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Explicit user-started GBox active protection session using bounded CPU and Wi-Fi performance locks with thermal backoff" />
+                android:value="Explicit user-started GBox protection session using bounded CPU/Wi-Fi performance locks plus reversible root-assisted Doze/standby handling when su already exists" />
         </service>
     </application>
 
