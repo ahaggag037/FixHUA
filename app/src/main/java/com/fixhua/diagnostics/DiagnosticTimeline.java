@@ -9,6 +9,8 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.os.BatteryManager;
 import android.os.PowerManager;
+import android.os.StatFs;
+import android.os.SystemClock;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -22,18 +24,55 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * Lightweight, read-only diagnostic recorder. Samples are written to private
- * app storage and are intended to be copied by the user in a diagnostic report.
- */
+/** Lightweight read-only device-wide timeline recorder. */
 final class DiagnosticTimeline {
     private static final String FILE_NAME = "diagnostic_timeline.log";
-    private static final long MAX_BYTES = 700_000L;
+    private static final long MAX_BYTES = 2_500_000L;
     private static volatile long previousCpuAvgKhz = -1L;
+    private static volatile long previousCpuTotal = -1L;
+    private static volatile long previousCpuIdle = -1L;
+    private static volatile long previousSampleElapsed = -1L;
 
     private DiagnosticTimeline() {}
 
-    static synchronized void recordSample(
+    static final class SampleSnapshot {
+        final long elapsedMs;
+        final long sampleGapMs;
+        final long samplerLateMs;
+        final double ramAvailableRatio;
+        final boolean ramLow;
+        final boolean memoryPsiAvailable;
+        final double memoryPsiSomeAvg10;
+        final double memoryPsiFullAvg10;
+        final boolean ioPsiAvailable;
+        final double ioPsiSomeAvg10;
+        final double cpuLoad;
+        final double cpuDropPct;
+        final int thermalStatus;
+
+        SampleSnapshot(long elapsedMs, long sampleGapMs, long samplerLateMs,
+                       double ramAvailableRatio, boolean ramLow,
+                       boolean memoryPsiAvailable, double memoryPsiSomeAvg10,
+                       double memoryPsiFullAvg10, boolean ioPsiAvailable,
+                       double ioPsiSomeAvg10, double cpuLoad, double cpuDropPct,
+                       int thermalStatus) {
+            this.elapsedMs = elapsedMs;
+            this.sampleGapMs = sampleGapMs;
+            this.samplerLateMs = samplerLateMs;
+            this.ramAvailableRatio = ramAvailableRatio;
+            this.ramLow = ramLow;
+            this.memoryPsiAvailable = memoryPsiAvailable;
+            this.memoryPsiSomeAvg10 = memoryPsiSomeAvg10;
+            this.memoryPsiFullAvg10 = memoryPsiFullAvg10;
+            this.ioPsiAvailable = ioPsiAvailable;
+            this.ioPsiSomeAvg10 = ioPsiSomeAvg10;
+            this.cpuLoad = cpuLoad;
+            this.cpuDropPct = cpuDropPct;
+            this.thermalStatus = thermalStatus;
+        }
+    }
+
+    static synchronized SampleSnapshot recordSample(
             Context context,
             String mode,
             boolean gboxForeground,
@@ -43,15 +82,41 @@ final class DiagnosticTimeline {
             int thermalStatus,
             boolean powerSave
     ) {
+        return recordSample(context, mode, gboxForeground, recentGbox, cpuLock, wifiMode,
+                thermalStatus, powerSave, 0L, "none", 0L, 0, "none");
+    }
+
+    static synchronized SampleSnapshot recordSample(
+            Context context,
+            String mode,
+            boolean gboxForeground,
+            boolean recentGbox,
+            boolean cpuLock,
+            String wifiMode,
+            int thermalStatus,
+            boolean powerSave,
+            long samplerLateMs,
+            String incidentState,
+            long incidentId,
+            int incidentScore,
+            String incidentReasons
+    ) {
+        long elapsed = SystemClock.elapsedRealtime();
+        long gapMs = previousSampleElapsed <= 0L ? 0L : Math.max(0L, elapsed - previousSampleElapsed);
+        previousSampleElapsed = elapsed;
+
         try {
             ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
             ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
             am.getMemoryInfo(mi);
             long totalRamMb = mi.totalMem / 1024L / 1024L;
             long availRamMb = mi.availMem / 1024L / 1024L;
+            double ramRatio = mi.totalMem > 0L ? (double) mi.availMem / (double) mi.totalMem : -1.0;
 
-            Psi psi = readMemoryPsi();
+            Pressure memPsi = readPressure(new File("/proc/pressure/memory"));
+            Pressure ioPsi = readPressure(new File("/proc/pressure/io"));
             CpuFreq cpu = readCpuFrequencies();
+            double cpuLoad = readCpuLoad();
             double dropPct = 0.0;
             if (previousCpuAvgKhz > 0L && cpu.avgKhz > 0L && cpu.avgKhz < previousCpuAvgKhz) {
                 dropPct = (previousCpuAvgKhz - cpu.avgKhz) * 100.0 / previousCpuAvgKhz;
@@ -61,42 +126,69 @@ final class DiagnosticTimeline {
             NetworkState network = networkState(context);
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             boolean gboxBatteryExempt = false;
+            boolean interactive = true;
             try {
                 gboxBatteryExempt = pm.isIgnoringBatteryOptimizations("com.gbox.android");
+                interactive = pm.isInteractive();
             } catch (Throwable ignored) {
             }
 
             BatteryState battery = batteryState(context);
+            boolean usageAccess = UsageAccessProbe.hasAccess(context);
+            String foreground = usageAccess ? UsageAccessProbe.currentForegroundPackage(context) : null;
+            boolean observedGboxForeground = gboxForeground || "com.gbox.android".equals(foreground);
+            int visibleProcesses = visibleProcessCount(am);
+            double storageFreePct = storageFreePercent(context);
+
             String cause = DiagnosticAnalyzer.classify(
                     thermalStatus,
                     availRamMb,
                     totalRamMb,
-                    psi.someAvg10,
-                    psi.fullAvg10,
+                    memPsi.available ? memPsi.someAvg10 : 0.0,
+                    memPsi.available ? memPsi.fullAvg10 : 0.0,
                     dropPct,
                     network.validated,
                     gboxBatteryExempt
             );
 
             String line = "ts=" + now()
+                    + " monoMs=" + elapsed
                     + " event=sample"
                     + " mode=" + safe(mode)
-                    + " gboxFg=" + gboxForeground
+                    + " incidentState=" + safe(incidentState)
+                    + " incidentId=" + incidentId
+                    + " incidentScore=" + incidentScore
+                    + " incidentConfidence=" + AutomaticIncidentDetector.confidenceForScore(incidentScore)
+                    + " incidentReasons=" + safe(incidentReasons)
+                    + " samplerLateMs=" + samplerLateMs
+                    + " sampleGapMs=" + gapMs
+                    + " usageAccess=" + usageAccess
+                    + " fgPkg=" + safe(foreground == null ? "UNAVAILABLE" : foreground)
+                    + " visibleProcCount=" + visibleProcesses
+                    + " gboxFg=" + observedGboxForeground
                     + " gboxRecent=" + recentGbox
                     + " cpuLock=" + cpuLock
                     + " wifiMode=" + safe(wifiMode)
+                    + " interactive=" + interactive
                     + " thermal=" + thermalStatus
                     + " powerSave=" + powerSave
                     + " ramAvailMB=" + availRamMb
                     + " ramTotalMB=" + totalRamMb
+                    + " ramAvailRatio=" + fmt(ramRatio)
                     + " ramLow=" + mi.lowMemory
-                    + " psiSomeAvg10=" + fmt(psi.someAvg10)
-                    + " psiFullAvg10=" + fmt(psi.fullAvg10)
+                    + " memoryPsiAvailable=" + memPsi.available
+                    + " psiSomeAvg10=" + fmt(memPsi.someAvg10)
+                    + " psiFullAvg10=" + fmt(memPsi.fullAvg10)
+                    + " ioPsiAvailable=" + ioPsi.available
+                    + " ioPsiSomeAvg10=" + fmt(ioPsi.someAvg10)
+                    + " ioPsiFullAvg10=" + fmt(ioPsi.fullAvg10)
+                    + " cpuLoad=" + fmt(cpuLoad)
                     + " cpuMinKHz=" + cpu.minKhz
                     + " cpuAvgKHz=" + cpu.avgKhz
                     + " cpuMaxKHz=" + cpu.maxKhz
                     + " cpuDropPct=" + fmt(dropPct)
                     + " cpuReadableCores=" + cpu.readableCores
+                    + " storageFreePct=" + fmt(storageFreePct)
                     + " net=" + safe(network.transport)
                     + " netValidated=" + network.validated
                     + " netMetered=" + network.metered
@@ -105,29 +197,39 @@ final class DiagnosticTimeline {
                     + " batteryCurrentUA=" + battery.currentUa
                     + " gboxBatteryExempt=" + gboxBatteryExempt
                     + " rootStatus=" + safe(RootSessionController.lastStatus(context))
-                    + " likelyCause=" + safe(cause)
+                    + " correlationHint=" + safe(cause)
                     + "\n";
 
             append(context, line);
+            return new SampleSnapshot(elapsed, gapMs, samplerLateMs, ramRatio, mi.lowMemory,
+                    memPsi.available, memPsi.someAvg10, memPsi.fullAvg10,
+                    ioPsi.available, ioPsi.someAvg10, cpuLoad, dropPct, thermalStatus);
         } catch (Throwable t) {
-            append(context, "ts=" + now() + " event=sample_error type=" + t.getClass().getSimpleName() + "\n");
+            append(context, "ts=" + now() + " monoMs=" + elapsed
+                    + " event=sample_error type=" + t.getClass().getSimpleName() + "\n");
+            return new SampleSnapshot(elapsed, gapMs, samplerLateMs, -1.0, false,
+                    false, Double.NaN, Double.NaN, false, Double.NaN,
+                    -1.0, 0.0, thermalStatus);
         }
     }
 
     static synchronized void recordEvent(Context context, String event, String detail) {
-        append(context, "ts=" + now() + " event=" + safe(event) + " detail=" + safe(detail) + "\n");
+        append(context, "ts=" + now() + " monoMs=" + SystemClock.elapsedRealtime()
+                + " event=" + safe(event) + " detail=" + safe(detail) + "\n");
     }
 
     static synchronized String report(Context context, int maxLines) {
         StringBuilder out = new StringBuilder();
-        out.append("\n=== DEEP DIAGNOSTIC TIMELINE ===\n");
-        out.append("Sampling cadence: mode=deep_test is 1 Hz while the user-started Deep Diagnostic Service is active; GuardService samples are approximately every 5 s while protection is active.\n");
-        out.append("User lag markers appear as event=user_lag_marker and should be correlated with samples immediately before and after the marker.\n");
-        out.append("Interpretation rule: likelyCause is correlation-based, not proof of root cause.\n");
-        out.append("Metric paths: CPU=/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq (fallback cpuinfo_cur_freq); memory PSI=/proc/pressure/memory; RAM=ActivityManager.MemoryInfo; thermal=PowerManager; battery=BatteryManager; network=ConnectivityManager.\n");
+        out.append("\n=== DEVICE DIAGNOSTIC TIMELINE ===\n");
+        out.append("Sampling: 1 Hz normally; temporarily 2 Hz while an automatic incident is suspected/active/recovering.\n");
+        out.append("Automatic incident states: NORMAL -> SUSPECTED -> INCIDENT -> RECOVERY -> NORMAL.\n");
+        out.append("samplerLateMs and sampleGapMs expose service stalls instead of silently hiding missing data.\n");
+        out.append("PSI unavailable is written as availability=false and NA, never as a synthetic zero.\n");
+        out.append("Package names may be recorded only when Usage Access is available; app content is never collected.\n");
+        out.append("Interpretation rule: correlationHint/incidentScore are evidence-ranking signals, not proof of root cause.\n");
         File f = new File(context.getFilesDir(), FILE_NAME);
         if (!f.canRead()) {
-            out.append("No timeline samples recorded yet. Start the deep diagnostic session, reproduce the issue, press the lag marker when it occurs, then generate the report.\n");
+            out.append("No timeline samples recorded yet. Start a diagnostic session and use the phone normally.\n");
             return out.toString();
         }
 
@@ -150,6 +252,9 @@ final class DiagnosticTimeline {
         File f = new File(context.getFilesDir(), FILE_NAME);
         if (f.exists()) f.delete();
         previousCpuAvgKhz = -1L;
+        previousCpuTotal = -1L;
+        previousCpuIdle = -1L;
+        previousSampleElapsed = -1L;
     }
 
     private static void append(Context context, String line) {
@@ -189,6 +294,38 @@ final class DiagnosticTimeline {
         return new CpuFreq(count == 0 ? 0L : min, count == 0 ? 0L : sum / count, max, count);
     }
 
+    private static double readCpuLoad() {
+        File stat = new File("/proc/stat");
+        if (!stat.canRead()) return -1.0;
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(stat), StandardCharsets.UTF_8))) {
+            String line = r.readLine();
+            if (line == null || !line.startsWith("cpu ")) return -1.0;
+            String[] p = line.trim().split("\\s+");
+            if (p.length < 8) return -1.0;
+            long user = parseLong(p, 1), nice = parseLong(p, 2), system = parseLong(p, 3);
+            long idle = parseLong(p, 4), iowait = parseLong(p, 5), irq = parseLong(p, 6), softirq = parseLong(p, 7);
+            long steal = p.length > 8 ? parseLong(p, 8) : 0L;
+            long idleAll = idle + iowait;
+            long total = user + nice + system + idleAll + irq + softirq + steal;
+            double load = -1.0;
+            if (previousCpuTotal >= 0L && total > previousCpuTotal) {
+                long totalDelta = total - previousCpuTotal;
+                long idleDelta = Math.max(0L, idleAll - previousCpuIdle);
+                load = totalDelta <= 0L ? -1.0 : Math.max(0.0, Math.min(1.0,
+                        (double) (totalDelta - idleDelta) / (double) totalDelta));
+            }
+            previousCpuTotal = total;
+            previousCpuIdle = idleAll;
+            return load;
+        } catch (Throwable ignored) {
+            return -1.0;
+        }
+    }
+
+    private static long parseLong(String[] values, int index) {
+        try { return Long.parseLong(values[index]); } catch (Throwable ignored) { return 0L; }
+    }
+
     private static long readLong(File file) {
         if (!file.canRead()) return -1L;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
@@ -199,30 +336,49 @@ final class DiagnosticTimeline {
         }
     }
 
-    private static Psi readMemoryPsi() {
-        File f = new File("/proc/pressure/memory");
-        if (!f.canRead()) return new Psi(0.0, 0.0);
-        double some = 0.0;
-        double full = 0.0;
+    private static Pressure readPressure(File f) {
+        if (!f.canRead()) return new Pressure(false, Double.NaN, Double.NaN);
+        double some = Double.NaN;
+        double full = Double.NaN;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
                 if (line.startsWith("some ")) some = parseAvg10(line);
                 if (line.startsWith("full ")) full = parseAvg10(line);
             }
+            return new Pressure(true, some, full);
         } catch (Throwable ignored) {
+            return new Pressure(false, Double.NaN, Double.NaN);
         }
-        return new Psi(some, full);
     }
 
     private static double parseAvg10(String line) {
         String[] parts = line.split("\\s+");
         for (String p : parts) {
             if (p.startsWith("avg10=")) {
-                try { return Double.parseDouble(p.substring(6)); } catch (Throwable ignored) { return 0.0; }
+                try { return Double.parseDouble(p.substring(6)); } catch (Throwable ignored) { return Double.NaN; }
             }
         }
-        return 0.0;
+        return Double.NaN;
+    }
+
+    private static int visibleProcessCount(ActivityManager am) {
+        try {
+            List<ActivityManager.RunningAppProcessInfo> processes = am.getRunningAppProcesses();
+            return processes == null ? 0 : processes.size();
+        } catch (Throwable ignored) {
+            return -1;
+        }
+    }
+
+    private static double storageFreePercent(Context context) {
+        try {
+            StatFs stat = new StatFs(context.getFilesDir().getAbsolutePath());
+            long total = stat.getTotalBytes();
+            return total <= 0L ? -1.0 : (stat.getAvailableBytes() * 100.0 / total);
+        } catch (Throwable ignored) {
+            return -1.0;
+        }
     }
 
     private static NetworkState networkState(Context context) {
@@ -235,11 +391,9 @@ final class DiagnosticTimeline {
                     : nc.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ? "CELLULAR"
                     : nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ? "ETHERNET"
                     : nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ? "VPN" : "OTHER";
-            return new NetworkState(
-                    transport,
+            return new NetworkState(transport,
                     nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-                    cm.isActiveNetworkMetered()
-            );
+                    cm.isActiveNetworkMetered());
         } catch (Throwable t) {
             return new NetworkState("ERROR", false, false);
         }
@@ -247,8 +401,8 @@ final class DiagnosticTimeline {
 
     private static BatteryState batteryState(Context context) {
         BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
-        int capacity = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-        int current = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+        int capacity = bm == null ? -1 : bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+        int current = bm == null ? 0 : bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
         String temp = "unknown";
         Intent battery = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (battery != null) {
@@ -264,7 +418,8 @@ final class DiagnosticTimeline {
     }
 
     private static String fmt(double value) {
-        return String.format(Locale.US, "%.2f", value);
+        if (Double.isNaN(value) || Double.isInfinite(value)) return "NA";
+        return String.format(Locale.US, "%.3f", value);
     }
 
     private static String now() {
@@ -282,9 +437,11 @@ final class DiagnosticTimeline {
         }
     }
 
-    private static final class Psi {
+    private static final class Pressure {
+        final boolean available;
         final double someAvg10, fullAvg10;
-        Psi(double someAvg10, double fullAvg10) {
+        Pressure(boolean available, double someAvg10, double fullAvg10) {
+            this.available = available;
             this.someAvg10 = someAvg10;
             this.fullAvg10 = fullAvg10;
         }
