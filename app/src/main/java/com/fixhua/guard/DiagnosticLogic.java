@@ -64,8 +64,15 @@ final class DiagnosticLogic {
 
         if (suOnPath) { strong++; evidence.add("su executable visible on PATH"); }
         if (rootManagerVisible) { strong++; evidence.add("known root manager package visible"); }
-        if (suspiciousMount) { strong++; evidence.add("mount table contains Magisk/KernelSU/APatch/overlay root signal"); }
         if (writableSystemSignal) { strong++; evidence.add("system/vendor mount appears writable"); }
+
+        // A mount anomaly alone is not strong evidence. Huawei/EMUI legitimately uses
+        // read-only overlay mounts (for example /preas over /system/product). Treat the
+        // boolean as a lead that requires raw mount inspection, not proof of root.
+        if (suspiciousMount) {
+            weak++;
+            evidence.add("mount anomaly/overlay visible; inspect raw mount source before attributing to root");
+        }
 
         String tags = norm(props.get("ro.build.tags"));
         String type = norm(props.get("ro.build.type"));
