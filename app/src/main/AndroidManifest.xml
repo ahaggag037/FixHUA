@@ -45,6 +45,15 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Explicit user-started GBox protection session using bounded CPU/Wi-Fi performance locks plus reversible root-assisted Doze/standby handling when su already exists" />
         </service>
+
+        <service
+            android:name=".DeepDiagnosticService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Explicit user-started read-only 1 Hz diagnostic capture for memory, CPU frequency, thermal, battery and network correlation around user-marked lag events" />
+        </service>
     </application>
 
 </manifest>
