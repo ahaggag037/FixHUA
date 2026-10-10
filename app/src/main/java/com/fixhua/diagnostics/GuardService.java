@@ -21,9 +21,15 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 
+/**
+ * Temporary active guard for user-started GBox sessions.
+ *
+ * It does not modify GBox, spoof device properties, disable thermal protection,
+ * or expose an unrestricted privileged endpoint. It only holds bounded host-side
+ * CPU/Wi-Fi performance locks during an explicit session and backs off on thermal pressure.
+ */
 public class GuardService extends Service {
     public static final String ACTION_STOP = "com.fixhua.diagnostics.GUARD_STOP";
-    public static final String ACTION_STARTED = "com.fixhua.diagnostics.GUARD_STARTED";
     public static final String ACTION_REOPEN_GBOX = "com.fixhua.diagnostics.REOPEN_GBOX";
 
     public static final String PREFS = "fixhua_guard";
@@ -35,22 +41,21 @@ public class GuardService extends Service {
     public static volatile boolean active = false;
 
     private static final String GBOX = "com.gbox.android";
-    private static final String CHANNEL_ID = "fixhua_guard";
-    private static final int NOTIFICATION_ID = 7301;
-    private static final long MAX_SESSION_MS = 2L * 60L * 60L * 1000L;
-    private static final long TICK_MS = 10_000L;
-    private static final long RECENT_GBOX_WINDOW_MS = 35_000L;
+    private static final String CHANNEL_ID = "fixhua_active_guard";
+    private static final int NOTIFICATION_ID = 7302;
+    private static final long MAX_SESSION_MS = 90L * 60L * 1000L;
+    private static final long TICK_MS = 5_000L;
+    private static final long RECENT_GBOX_WINDOW_MS = 45_000L;
 
-    private PowerManager.WakeLock wakeLock;
-    private WifiManager.WifiLock wifiLock;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private PowerManager.WakeLock cpuWakeLock;
+    private WifiManager.WifiLock wifiLock;
+    private SessionPolicy.WifiMode heldWifiMode = SessionPolicy.WifiMode.NONE;
 
     private long sessionStartedAt;
     private long lastGboxSeenAt;
-    private boolean gboxForeground;
-    private boolean usageAccess;
+    private boolean lastForeground;
     private int peakThermal;
-    private int focusEntries;
 
     private final Runnable watchdog = new Runnable() {
         @Override
@@ -65,10 +70,9 @@ public class GuardService extends Service {
         super.onCreate();
         active = true;
         sessionStartedAt = System.currentTimeMillis();
-        usageAccess = hasUsageAccess(this);
         incrementLong("sessions", 1L);
         createChannel();
-        startForeground(NOTIFICATION_ID, buildNotification("Starting adaptive protection…"));
+        startForeground(NOTIFICATION_ID, buildNotification("Starting active guard…"));
         handler.post(watchdog);
         handler.postDelayed(this::stopSelf, MAX_SESSION_MS);
     }
@@ -79,95 +83,132 @@ public class GuardService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        sendBroadcast(new Intent(ACTION_STARTED).setPackage(getPackageName()));
         runAdaptiveTick();
         return START_STICKY;
     }
 
     private void runAdaptiveTick() {
-        String mode = getMode(this);
-        usageAccess = hasUsageAccess(this);
-        String foreground = usageAccess ? currentForegroundPackage() : null;
-        boolean nowGboxForeground = GBOX.equals(foreground);
-        long now = System.currentTimeMillis();
-
-        if (nowGboxForeground) {
-            lastGboxSeenAt = now;
-            if (!gboxForeground) {
-                focusEntries++;
-                incrementLong("gbox_focus_entries", 1L);
-            }
-        }
-        gboxForeground = nowGboxForeground;
-
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         int thermal = PowerManager.THERMAL_STATUS_NONE;
+        boolean interactive = true;
+        boolean powerSave = false;
         try {
             thermal = pm.getCurrentThermalStatus();
-            if (thermal > peakThermal) peakThermal = thermal;
+            interactive = pm.isInteractive();
+            powerSave = pm.isPowerSaveMode();
         } catch (Throwable ignored) {
         }
+        peakThermal = Math.max(peakThermal, thermal);
 
-        boolean validatedWifi = isValidatedWifi();
+        boolean usageAccess = hasUsageAccess(this);
+        String foreground = usageAccess ? currentForegroundPackage() : null;
+        boolean gboxForeground = GBOX.equals(foreground);
+        long now = System.currentTimeMillis();
+
+        if (gboxForeground) {
+            lastGboxSeenAt = now;
+            if (!lastForeground) incrementLong("gbox_focus_entries", 1L);
+        }
+        lastForeground = gboxForeground;
+
         boolean recentGbox = lastGboxSeenAt > 0 && now - lastGboxSeenAt <= RECENT_GBOX_WINDOW_MS;
-        boolean cpuWanted;
-        boolean wifiWanted;
+        boolean validatedWifi = isValidatedWifi();
+        String mode = getMode(this);
 
-        if (MODE_STABILITY.equals(mode)) {
-            cpuWanted = true;
-            wifiWanted = validatedWifi;
-        } else if (MODE_ECO.equals(mode)) {
-            cpuWanted = usageAccess && nowGboxForeground;
-            wifiWanted = false;
-        } else {
-            // Balanced: keep protection only around real GBox activity when Usage Access is available.
-            // Without Usage Access, preserve v1.0 behavior so protection still works out of the box.
-            cpuWanted = usageAccess ? (nowGboxForeground || recentGbox) : true;
-            wifiWanted = validatedWifi && (usageAccess ? (nowGboxForeground || recentGbox) : true);
-        }
+        SessionPolicy.Decision decision = SessionPolicy.decide(
+                mode,
+                usageAccess,
+                gboxForeground,
+                recentGbox,
+                interactive,
+                validatedWifi,
+                powerSave,
+                thermal
+        );
 
-        // Wi-Fi high-performance mode is the first thing we drop under real thermal pressure.
+        setCpuLock(decision.cpuWakeLock);
+        setWifiMode(decision.wifiMode);
+
+        String state = stateLabel(mode, usageAccess, gboxForeground, thermal, decision);
+        saveRuntimeState(state, thermal, decision);
+        updateNotification(state);
+    }
+
+    private String stateLabel(
+            String mode,
+            boolean usageAccess,
+            boolean gboxForeground,
+            int thermal,
+            SessionPolicy.Decision decision
+    ) {
+        String modeLabel = MODE_STABILITY.equals(mode) ? "Stability"
+                : MODE_ECO.equals(mode) ? "Eco" : "Balanced";
+        StringBuilder b = new StringBuilder(modeLabel).append(" • ");
         if (thermal >= PowerManager.THERMAL_STATUS_SEVERE) {
-            wifiWanted = false;
+            b.append("thermal safeguard");
+        } else if (!usageAccess) {
+            b.append("basic explicit-session protection");
+        } else if (gboxForeground) {
+            b.append("GBox active");
+        } else {
+            b.append("waiting / grace window");
         }
-
-        setCpuLock(cpuWanted);
-        setWifiLock(wifiWanted);
-        updateNotification(mode, foreground, thermal, validatedWifi);
+        if (decision.wifiMode == SessionPolicy.WifiMode.LOW_LATENCY) b.append(" • Wi-Fi low latency");
+        if (decision.wifiMode == SessionPolicy.WifiMode.HIGH_PERF) b.append(" • Wi-Fi high perf");
+        if (decision.cpuWakeLock) b.append(" • CPU awake");
+        return b.toString();
     }
 
-    private void setCpuLock(boolean wanted) {
+    private synchronized void setCpuLock(boolean wanted) {
         try {
-            if (wakeLock == null) {
-                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FixHUA:AdaptiveRuntimeGuard");
-                wakeLock.setReferenceCounted(false);
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (cpuWakeLock == null) {
+                cpuWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "FixHUA:ActiveGuardCpu");
+                cpuWakeLock.setReferenceCounted(false);
             }
-            if (wanted && !wakeLock.isHeld()) wakeLock.acquire();
-            if (!wanted && wakeLock.isHeld()) wakeLock.release();
+            if (wanted && !cpuWakeLock.isHeld()) cpuWakeLock.acquire(MAX_SESSION_MS);
+            if (!wanted && cpuWakeLock.isHeld()) cpuWakeLock.release();
         } catch (Throwable ignored) {
         }
     }
 
-    private void setWifiLock(boolean wanted) {
+    private synchronized void setWifiMode(SessionPolicy.WifiMode wanted) {
         try {
-            if (wifiLock == null) {
-                WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-                if (wm != null) {
-                    wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "FixHUA:AdaptiveHighPerfWifi");
-                    wifiLock.setReferenceCounted(false);
-                }
+            if (wanted == heldWifiMode && wifiLock != null && wifiLock.isHeld()) return;
+            releaseWifiLock();
+            heldWifiMode = SessionPolicy.WifiMode.NONE;
+            if (wanted == SessionPolicy.WifiMode.NONE) return;
+
+            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wm == null || !wm.isWifiEnabled()) return;
+
+            int lockMode = WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+            if (wanted == SessionPolicy.WifiMode.LOW_LATENCY && Build.VERSION.SDK_INT >= 29) {
+                lockMode = WifiManager.WIFI_MODE_FULL_LOW_LATENCY;
             }
-            if (wifiLock == null) return;
-            if (wanted && !wifiLock.isHeld()) wifiLock.acquire();
-            if (!wanted && wifiLock.isHeld()) wifiLock.release();
+            wifiLock = wm.createWifiLock(lockMode, "FixHUA:ActiveGuardWifi");
+            wifiLock.setReferenceCounted(false);
+            wifiLock.acquire();
+            heldWifiMode = wanted;
         } catch (Throwable ignored) {
+            releaseWifiLock();
+            heldWifiMode = SessionPolicy.WifiMode.NONE;
         }
+    }
+
+    private void releaseWifiLock() {
+        if (wifiLock != null && wifiLock.isHeld()) {
+            try {
+                wifiLock.release();
+            } catch (Throwable ignored) {
+            }
+        }
+        wifiLock = null;
     }
 
     private boolean isValidatedWifi() {
         try {
-            ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
             Network network = cm.getActiveNetwork();
             if (network == null) return false;
             NetworkCapabilities caps = cm.getNetworkCapabilities(network);
@@ -183,7 +224,7 @@ public class GuardService extends Service {
         try {
             UsageStatsManager usm = (UsageStatsManager) getSystemService(USAGE_STATS_SERVICE);
             long end = System.currentTimeMillis();
-            UsageEvents events = usm.queryEvents(end - 20_000L, end);
+            UsageEvents events = usm.queryEvents(end - 30_000L, end);
             UsageEvents.Event event = new UsageEvents.Event();
             String latest = null;
             long latestTime = 0L;
@@ -233,40 +274,30 @@ public class GuardService extends Service {
         return context.getSharedPreferences(PREFS, MODE_PRIVATE).getLong(key, 0L);
     }
 
+    static String lastState(Context context) {
+        return context.getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("last_runtime_state", "not started yet");
+    }
+
+    private void saveRuntimeState(String state, int thermal, SessionPolicy.Decision decision) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString("last_runtime_state", state)
+                .putLong("last_thermal", thermal)
+                .putLong("cpu_lock", decision.cpuWakeLock ? 1L : 0L)
+                .putLong("wifi_mode", decision.wifiMode.ordinal())
+                .apply();
+    }
+
     private void incrementLong(String key, long amount) {
         SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
         p.edit().putLong(key, p.getLong(key, 0L) + amount).apply();
-    }
-
-    private void updateNotification(String mode, String foreground, int thermal, boolean validatedWifi) {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm == null) return;
-
-        String modeText = MODE_STABILITY.equals(mode) ? "Stability"
-                : MODE_ECO.equals(mode) ? "Eco" : "Balanced";
-        String state;
-        if (!usageAccess) {
-            state = modeText + " • basic protection • enable Usage Access for adaptive mode";
-        } else if (GBOX.equals(foreground)) {
-            state = modeText + " • GBox active • adaptive protection ON";
-        } else {
-            state = modeText + " • waiting for GBox";
-        }
-        if (thermal >= PowerManager.THERMAL_STATUS_SEVERE) {
-            state += " • thermal safeguard";
-        } else if (validatedWifi && wifiLock != null && wifiLock.isHeld()) {
-            state += " • Wi-Fi boost";
-        }
-        nm.notify(NOTIFICATION_ID, buildNotification(state));
     }
 
     private Notification buildNotification(String text) {
         Intent openIntent = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open = PendingIntent.getActivity(
-                this,
-                10,
-                openIntent,
+                this, 10, openIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
@@ -274,53 +305,48 @@ public class GuardService extends Service {
                 .setAction(ACTION_REOPEN_GBOX)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent reopen = PendingIntent.getActivity(
-                this,
-                12,
-                reopenIntent,
+                this, 11, reopenIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
         Intent stopIntent = new Intent(this, GuardService.class).setAction(ACTION_STOP);
         PendingIntent stop = PendingIntent.getService(
-                this,
-                11,
-                stopIntent,
+                this, 12, stopIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Notification.Builder builder = Build.VERSION.SDK_INT >= 26
-                ? new Notification.Builder(this, CHANNEL_ID)
-                : new Notification.Builder(this);
-
-        return builder
+        return new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-                .setContentTitle("FixHUA Guard v1.1")
+                .setContentTitle("FixHUA Active Guard v2.2")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .addAction(new Notification.Action.Builder(
-                        android.R.drawable.ic_media_play,
-                        "Reopen GBox",
-                        reopen
-                ).build())
+                        android.R.drawable.ic_media_play, "Open GBox", reopen).build())
                 .addAction(new Notification.Action.Builder(
-                        android.R.drawable.ic_menu_close_clear_cancel,
-                        "Stop protection",
-                        stop
-                ).build())
+                        android.R.drawable.ic_menu_close_clear_cancel, "Stop", stop).build())
                 .build();
+    }
+
+    private void updateNotification(String text) {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify(NOTIFICATION_ID, buildNotification(text));
+        } catch (Throwable ignored) {
+        }
     }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "FixHUA adaptive runtime protection",
+                    "FixHUA active protection",
                     NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("Visible while FixHUA protects a GBox session");
-            NotificationManager nm = getSystemService(NotificationManager.class);
+            channel.setDescription("Visible while the user-started GBox active guard is running");
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null) nm.createNotificationChannel(channel);
         }
     }
@@ -329,6 +355,14 @@ public class GuardService extends Service {
     public void onDestroy() {
         active = false;
         handler.removeCallbacksAndMessages(null);
+        releaseWifiLock();
+        if (cpuWakeLock != null && cpuWakeLock.isHeld()) {
+            try {
+                cpuWakeLock.release();
+            } catch (Throwable ignored) {
+            }
+        }
+        cpuWakeLock = null;
 
         long duration = Math.max(0L, System.currentTimeMillis() - sessionStartedAt);
         SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -336,18 +370,7 @@ public class GuardService extends Service {
                 .putLong("last_session_ms", duration)
                 .putLong("total_guard_ms", p.getLong("total_guard_ms", 0L) + duration)
                 .putLong("last_peak_thermal", peakThermal)
-                .putLong("last_focus_entries", focusEntries)
                 .apply();
-
-        try {
-            if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
-        } catch (Throwable ignored) {
-        }
-        try {
-            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        } catch (Throwable ignored) {
-        }
-        stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
 

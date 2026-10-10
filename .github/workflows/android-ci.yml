@@ -1,4 +1,4 @@
-name: FixHUA Android CI
+name: FixHUA Active Guard Android CI
 
 on:
   push:
@@ -32,6 +32,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Unit tests
+        run: gradle --stacktrace testDebugUnitTest
+
       - name: Lint release
         run: gradle --stacktrace lintRelease
 
@@ -48,13 +51,13 @@ jobs:
             -keyalg RSA \
             -keysize 3072 \
             -validity 10000 \
-            -dname "CN=FixHUA, OU=Personal Android, O=FixHUA, C=EG" \
+            -dname "CN=FixHUA Active Guard, OU=Personal Android, O=FixHUA, C=EG" \
             -storetype PKCS12
 
       - name: Align and sign release APK
         run: |
           IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-Guard-v1.0.0.apk
+          OUT=app/build/outputs/apk/release/FixHUA-ActiveGuard-v2.2.0.apk
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
@@ -66,18 +69,20 @@ jobs:
 
       - name: Verify release APK
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-Guard-v1.0.0.apk
+          APK=app/build/outputs/apk/release/FixHUA-ActiveGuard-v2.2.0.apk
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -50 | tee app/build/outputs/apk/release/apk-badging.txt
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-Guard-v1.0.0.apk.sha256
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -60 | tee app/build/outputs/apk/release/apk-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
+          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-ActiveGuard-v2.2.0.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-Guard-v1.0.0-release
+          name: FixHUA-ActiveGuard-v2.2.0-release
           path: |
-            app/build/outputs/apk/release/FixHUA-Guard-v1.0.0.apk
-            app/build/outputs/apk/release/FixHUA-Guard-v1.0.0.apk.sha256
+            app/build/outputs/apk/release/FixHUA-ActiveGuard-v2.2.0.apk
+            app/build/outputs/apk/release/FixHUA-ActiveGuard-v2.2.0.apk.sha256
             app/build/outputs/apk/release/apksigner.txt
             app/build/outputs/apk/release/apk-badging.txt
+            app/build/outputs/apk/release/apk-permissions.txt
           if-no-files-found: error
