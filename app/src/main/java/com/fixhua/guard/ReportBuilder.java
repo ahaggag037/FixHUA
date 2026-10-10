@@ -6,11 +6,22 @@ import java.util.Locale;
 
 final class ReportBuilder {
     static String build(SystemSnapshot s, ReadinessEngine.Result result) {
-        StringBuilder out = new StringBuilder(4096);
-        out.append("FixHUA Compatibility & Stability Report v2.0\n");
+        return build(s, result, "manual_scan");
+    }
+
+    static String buildIncident(SystemSnapshot s, ReadinessEngine.Result result) {
+        return build(s, result, "manual_incident_snapshot");
+    }
+
+    private static String build(SystemSnapshot s, ReadinessEngine.Result result, String captureType) {
+        StringBuilder out = new StringBuilder(6144);
+        out.append("FixHUA Compatibility & Stability Report v2.1.0-temp\n");
         out.append("Generated: ")
                 .append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(new Date()))
                 .append('\n');
+        out.append("capture_type=").append(captureType).append('\n');
+        out.append("point_in_time_snapshot=true\n");
+        out.append("causal_diagnosis=false\n");
         out.append("Privacy: no accounts, contacts, messages, photos, location, Android ID, serial number, or IP address are collected.\n\n");
 
         out.append("=== READINESS ===\n");
@@ -29,8 +40,11 @@ final class ReportBuilder {
         out.append("huawei_environment=").append(s.huaweiEnvironment).append('\n');
         out.append("identity_conflict_signal=").append(s.identityConflict).append("\n\n");
 
-        out.append("=== GOOGLE COMPATIBILITY ===\n");
+        out.append("=== GBOX / GOOGLE COMPATIBILITY ===\n");
         out.append("gbox_installed=").append(s.gboxInstalled).append('\n');
+        out.append("gbox_enabled=").append(s.gboxEnabled).append('\n');
+        out.append("gbox_launchable=").append(s.gboxLaunchable).append('\n');
+        out.append("gbox_suspended=").append(s.gboxSuspended).append('\n');
         out.append("gbox_version=").append(s.gboxVersion).append('\n');
         out.append("gbox_installer=").append(s.gboxInstaller).append('\n');
         out.append("microg_installed=").append(s.microgInstalled).append('\n');
@@ -47,14 +61,21 @@ final class ReportBuilder {
         out.append("microg_battery_exempt=").append(s.microgBatteryExempt).append('\n');
         out.append("power_save_mode=").append(s.powerSaveMode).append('\n');
         out.append("device_idle_mode=").append(s.deviceIdleMode).append('\n');
+        out.append("device_interactive=").append(s.deviceInteractive).append('\n');
         out.append("thermal_status=").append(s.thermalStatus).append('\n');
-        out.append("battery_percent=").append(s.batteryPercent).append('\n');
-        out.append("battery_temp_c=").append(String.format(Locale.US, "%.1f", s.batteryTempC)).append("\n\n");
+        out.append("battery_percent=").append(s.batteryPercent < 0 ? "unknown" : s.batteryPercent).append('\n');
+        out.append("battery_temp_c=")
+                .append(Float.isNaN(s.batteryTempC) ? "unknown" : String.format(Locale.US, "%.1f", s.batteryTempC))
+                .append('\n');
+        out.append("battery_charging=").append(s.batteryCharging).append("\n\n");
 
         out.append("=== MEMORY / STORAGE ===\n");
         out.append("ram_total_mb=").append(s.totalRamMb).append('\n');
         out.append("ram_available_mb=").append(s.availableRamMb).append('\n');
-        out.append("low_memory=").append(s.lowMemory).append('\n');
+        out.append("ram_available_percent=")
+                .append(String.format(Locale.US, "%.1f", s.availableRamFraction() * 100.0)).append('\n');
+        out.append("android_low_memory_signal=").append(s.lowMemory).append('\n');
+        out.append("low_ram_device=").append(s.lowRamDevice).append('\n');
         out.append("storage_total_mb=").append(s.totalStorageMb).append('\n');
         out.append("storage_free_mb=").append(s.freeStorageMb).append('\n');
         out.append("storage_free_percent=")
@@ -62,9 +83,11 @@ final class ReportBuilder {
                 .append("\n\n");
 
         out.append("=== NETWORK ===\n");
+        out.append("network_observed=").append(s.networkObserved).append('\n');
         out.append("network_present=").append(s.networkPresent).append('\n');
         out.append("internet_capability=").append(s.networkInternetCapable).append('\n');
         out.append("validated=").append(s.networkValidated).append('\n');
+        out.append("captive_portal=").append(s.networkCaptivePortal).append('\n');
         out.append("wifi=").append(s.networkWifi).append('\n');
         out.append("vpn=").append(s.networkVpn).append('\n');
         out.append("metered=").append(s.networkMetered).append("\n\n");
@@ -82,11 +105,14 @@ final class ReportBuilder {
         } else {
             for (ReadinessEngine.Finding finding : result.findings) {
                 out.append('[').append(finding.severity.name()).append("] ")
-                        .append(finding.code).append(": ")
-                        .append(finding.message).append('\n');
+                        .append(finding.code)
+                        .append(" action=").append(finding.action.name())
+                        .append(": ").append(finding.message).append('\n');
             }
         }
 
+        out.append("\n=== INTERPRETATION LIMIT ===\n");
+        out.append("This report is a point-in-time compatibility snapshot. It does not prove why GBox or an app exited.\n");
         return out.toString();
     }
 

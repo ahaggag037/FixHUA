@@ -29,6 +29,21 @@ final class SettingsNavigator {
         startSafely(context, intent, new Intent(Settings.ACTION_SETTINGS));
     }
 
+    static void openAppGallery(Context context) {
+        PackageManager pm = context.getPackageManager();
+        Intent launch = pm.getLaunchIntentForPackage(SystemSnapshot.APP_GALLERY);
+        if (launch != null) {
+            if (!(context instanceof Activity)) launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                context.startActivity(launch);
+                return;
+            } catch (RuntimeException ignored) {
+                // Fall through to general settings if AppGallery cannot launch.
+            }
+        }
+        startSafely(context, new Intent(Settings.ACTION_SETTINGS), new Intent(Settings.ACTION_SETTINGS));
+    }
+
     static void openHuaweiAppLaunch(Context context) {
         String[][] targets = new String[][]{
                 {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
@@ -52,6 +67,7 @@ final class SettingsNavigator {
 
         Intent systemManager = pm.getLaunchIntentForPackage(SystemSnapshot.HUAWEI_SYSTEM_MANAGER);
         if (systemManager != null) {
+            if (!(context instanceof Activity)) systemManager.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
                 context.startActivity(systemManager);
                 return;
@@ -112,32 +128,36 @@ final class SettingsNavigator {
 
     static void fixFinding(Context context, ReadinessEngine.Finding finding) {
         if (finding == null) return;
-        switch (finding.code) {
-            case "GBOX_MISSING":
-            case "GBOX_BATTERY_OPTIMIZED":
-                if ("GBOX_MISSING".equals(finding.code)) {
-                    openAppDetails(context, SystemSnapshot.GBOX);
-                } else {
-                    openBatteryOptimizationSettings(context);
-                }
+        switch (finding.action) {
+            case OPEN_APP_GALLERY:
+                openAppGallery(context);
                 break;
-            case "ALWAYS_FINISH_ACTIVITIES":
-                openDeveloperOptions(context);
+            case OPEN_GBOX_DETAILS:
+                openAppDetails(context, SystemSnapshot.GBOX);
                 break;
-            case "POWER_SAVE":
+            case OPEN_HUAWEI_APP_LAUNCH:
+                openHuaweiAppLaunch(context);
+                break;
+            case OPEN_BATTERY_OPTIMIZATION:
+                openBatteryOptimizationSettings(context);
+                break;
+            case OPEN_BATTERY_SETTINGS:
                 openBatterySettings(context);
                 break;
-            case "LOW_STORAGE":
+            case OPEN_DEVELOPER_OPTIONS:
+                openDeveloperOptions(context);
+                break;
+            case OPEN_STORAGE_SETTINGS:
                 openStorageSettings(context);
                 break;
-            case "NETWORK_UNVALIDATED":
+            case OPEN_WIRELESS_SETTINGS:
                 openWirelessSettings(context);
                 break;
-            case "TIME_SETTINGS":
+            case OPEN_DATE_SETTINGS:
                 openDateSettings(context);
                 break;
+            case NONE:
             default:
-                openAppDetails(context, SystemSnapshot.GBOX);
                 break;
         }
     }

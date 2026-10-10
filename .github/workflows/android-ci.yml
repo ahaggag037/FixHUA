@@ -5,6 +5,7 @@ on:
     branches: [ main, 'build/**', 'release/**', 'rewrite/**' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,6 +14,11 @@ jobs:
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      APK_NAME: FixHUA-v2.1.0-temp.apk
+      FIXHUA_KEYSTORE_B64: ${{ secrets.FIXHUA_KEYSTORE_B64 }}
+      FIXHUA_KEY_ALIAS: ${{ secrets.FIXHUA_KEY_ALIAS }}
+      FIXHUA_KEYSTORE_PASSWORD: ${{ secrets.FIXHUA_KEYSTORE_PASSWORD }}
+      FIXHUA_KEY_PASSWORD: ${{ secrets.FIXHUA_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,48 +47,66 @@ jobs:
       - name: Build unsigned release APK
         run: gradle --stacktrace assembleRelease
 
-      - name: Create temporary release signing key
+      - name: Prepare release signing key
+        shell: bash
         run: |
-          keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/fixhua-v2-release.jks" \
-            -storepass "FixHUA-V2-CI-2026" \
-            -keypass "FixHUA-V2-CI-2026" \
-            -alias fixhua-v2 \
-            -keyalg RSA \
-            -keysize 3072 \
-            -validity 10000 \
-            -dname "CN=FixHUA v2, OU=Personal Android, O=FixHUA, C=EG" \
-            -storetype PKCS12
+          set -euo pipefail
+          if [[ -n "${FIXHUA_KEYSTORE_B64:-}" && -n "${FIXHUA_KEY_ALIAS:-}" && -n "${FIXHUA_KEYSTORE_PASSWORD:-}" && -n "${FIXHUA_KEY_PASSWORD:-}" ]]; then
+            echo "$FIXHUA_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/fixhua-release.jks"
+            echo "SIGN_KS=$RUNNER_TEMP/fixhua-release.jks" >> "$GITHUB_ENV"
+            echo "SIGN_ALIAS=$FIXHUA_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "SIGN_STORE_PASS=$FIXHUA_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "SIGN_KEY_PASS=$FIXHUA_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "stable-secret" > app/build/outputs/apk/release/signing-mode.txt
+          else
+            keytool -genkeypair -v \
+              -keystore "$RUNNER_TEMP/fixhua-temp-release.jks" \
+              -storepass "FixHUA-Temp-CI-2026" \
+              -keypass "FixHUA-Temp-CI-2026" \
+              -alias fixhua-temp \
+              -keyalg RSA \
+              -keysize 3072 \
+              -validity 10000 \
+              -dname "CN=FixHUA temporary CI, OU=Personal Android, O=FixHUA, C=EG" \
+              -storetype PKCS12
+            echo "SIGN_KS=$RUNNER_TEMP/fixhua-temp-release.jks" >> "$GITHUB_ENV"
+            echo "SIGN_ALIAS=fixhua-temp" >> "$GITHUB_ENV"
+            echo "SIGN_STORE_PASS=FixHUA-Temp-CI-2026" >> "$GITHUB_ENV"
+            echo "SIGN_KEY_PASS=FixHUA-Temp-CI-2026" >> "$GITHUB_ENV"
+            echo "ephemeral-ci-key-reinstall-required" > app/build/outputs/apk/release/signing-mode.txt
+          fi
 
       - name: Align and sign release APK
         run: |
+          set -euo pipefail
           IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          OUT="app/build/outputs/apk/release/$APK_NAME"
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
-            --ks "$RUNNER_TEMP/fixhua-v2-release.jks" \
-            --ks-key-alias fixhua-v2 \
-            --ks-pass pass:FixHUA-V2-CI-2026 \
-            --key-pass pass:FixHUA-V2-CI-2026 \
+            --ks "$SIGN_KS" \
+            --ks-key-alias "$SIGN_ALIAS" \
+            --ks-pass "pass:$SIGN_STORE_PASS" \
+            --key-pass "pass:$SIGN_KEY_PASS" \
             "$OUT"
 
       - name: Verify APK identity, signature, and permission surface
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/$APK_NAME"
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
-          grep -q "package: name='com.fixhua.guard' versionCode='20' versionName='2.0.0'" app/build/outputs/apk/release/apk-badging.txt
+          grep -q "package: name='com.fixhua.guard' versionCode='21' versionName='2.1.0-temp'" app/build/outputs/apk/release/apk-badging.txt
           grep -q "android.permission.ACCESS_NETWORK_STATE" app/build/outputs/apk/release/apk-permissions.txt
-          for forbidden in WAKE_LOCK KILL_BACKGROUND_PROCESSES FOREGROUND_SERVICE POST_NOTIFICATIONS PACKAGE_USAGE_STATS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS CHANGE_WIFI_STATE; do
+          for forbidden in INTERNET WAKE_LOCK KILL_BACKGROUND_PROCESSES FOREGROUND_SERVICE POST_NOTIFICATIONS PACKAGE_USAGE_STATS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS CHANGE_WIFI_STATE QUERY_ALL_PACKAGES; do
             if grep -q "android.permission.$forbidden" app/build/outputs/apk/release/apk-permissions.txt; then
-              echo "Forbidden legacy permission present: $forbidden"
+              echo "Forbidden/unneeded permission present: $forbidden"
               exit 1
             fi
           done
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+          sha256sum "$APK" | tee "app/build/outputs/apk/release/$APK_NAME.sha256"
 
       - name: Enable KVM for Android 12 smoke test
         run: |
@@ -100,25 +124,30 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            adb install -r app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+            adb install -r "app/build/outputs/apk/release/$APK_NAME"
             adb logcat -c
             adb shell am force-stop com.fixhua.guard
             adb shell am start -W -n com.fixhua.guard/.MainActivity | tee app/build/outputs/apk/release/smoke-start.txt
             sleep 4
             adb shell pidof com.fixhua.guard | grep -Eq '[0-9]+'
             adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.MainActivity"
+            adb shell uiautomator dump /sdcard/fixhua-window.xml >/dev/null
+            adb pull /sdcard/fixhua-window.xml app/build/outputs/apk/release/ui-window.xml >/dev/null
+            grep -F "FixHUA 2.1" app/build/outputs/apk/release/ui-window.xml
             test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.fixhua.guard' || true)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-v2.0.0-release
+          name: FixHUA-v2.1.0-temp-release
           path: |
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+            app/build/outputs/apk/release/FixHUA-v2.1.0-temp.apk
+            app/build/outputs/apk/release/FixHUA-v2.1.0-temp.apk.sha256
             app/build/outputs/apk/release/apksigner.txt
             app/build/outputs/apk/release/apk-badging.txt
             app/build/outputs/apk/release/apk-permissions.txt
+            app/build/outputs/apk/release/signing-mode.txt
             app/build/outputs/apk/release/smoke-start.txt
+            app/build/outputs/apk/release/ui-window.xml
             app/build/reports/tests/testReleaseUnitTest/
             app/build/reports/lint-results-release.html
           if-no-files-found: error

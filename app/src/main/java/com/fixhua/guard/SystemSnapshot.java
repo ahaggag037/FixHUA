@@ -4,6 +4,7 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.InstallSourceInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -29,6 +30,9 @@ final class SystemSnapshot {
     static final String APP_GALLERY = "com.huawei.appmarket";
 
     final boolean gboxInstalled;
+    final boolean gboxEnabled;
+    final boolean gboxLaunchable;
+    final boolean gboxSuspended;
     final String gboxVersion;
     final String gboxInstaller;
     final boolean microgInstalled;
@@ -52,22 +56,27 @@ final class SystemSnapshot {
     final boolean microgBatteryExempt;
     final boolean powerSaveMode;
     final boolean deviceIdleMode;
+    final boolean deviceInteractive;
     final int thermalStatus;
     final int batteryPercent;
     final float batteryTempC;
+    final boolean batteryCharging;
 
     final long totalRamMb;
     final long availableRamMb;
     final boolean lowMemory;
+    final boolean lowRamDevice;
     final long totalStorageMb;
     final long freeStorageMb;
 
+    final boolean networkObserved;
     final boolean networkPresent;
     final boolean networkInternetCapable;
     final boolean networkValidated;
     final boolean networkWifi;
     final boolean networkVpn;
     final boolean networkMetered;
+    final boolean networkCaptivePortal;
 
     final String webViewPackage;
     final String webViewVersion;
@@ -78,6 +87,9 @@ final class SystemSnapshot {
 
     private SystemSnapshot(Builder b) {
         gboxInstalled = b.gboxInstalled;
+        gboxEnabled = b.gboxEnabled;
+        gboxLaunchable = b.gboxLaunchable;
+        gboxSuspended = b.gboxSuspended;
         gboxVersion = b.gboxVersion;
         gboxInstaller = b.gboxInstaller;
         microgInstalled = b.microgInstalled;
@@ -99,20 +111,25 @@ final class SystemSnapshot {
         microgBatteryExempt = b.microgBatteryExempt;
         powerSaveMode = b.powerSaveMode;
         deviceIdleMode = b.deviceIdleMode;
+        deviceInteractive = b.deviceInteractive;
         thermalStatus = b.thermalStatus;
         batteryPercent = b.batteryPercent;
         batteryTempC = b.batteryTempC;
+        batteryCharging = b.batteryCharging;
         totalRamMb = b.totalRamMb;
         availableRamMb = b.availableRamMb;
         lowMemory = b.lowMemory;
+        lowRamDevice = b.lowRamDevice;
         totalStorageMb = b.totalStorageMb;
         freeStorageMb = b.freeStorageMb;
+        networkObserved = b.networkObserved;
         networkPresent = b.networkPresent;
         networkInternetCapable = b.networkInternetCapable;
         networkValidated = b.networkValidated;
         networkWifi = b.networkWifi;
         networkVpn = b.networkVpn;
         networkMetered = b.networkMetered;
+        networkCaptivePortal = b.networkCaptivePortal;
         webViewPackage = b.webViewPackage;
         webViewVersion = b.webViewVersion;
         alwaysFinishActivities = b.alwaysFinishActivities;
@@ -136,6 +153,16 @@ final class SystemSnapshot {
         b.gboxInstalled = gbox != null;
         b.gboxVersion = versionName(gbox);
         b.gboxInstaller = gbox == null ? "not-installed" : installer(pm, GBOX);
+        if (gbox != null) {
+            ApplicationInfo appInfo = gbox.applicationInfo;
+            b.gboxEnabled = appInfo == null || appInfo.enabled;
+            b.gboxLaunchable = safeLaunchIntent(pm, GBOX) != null;
+            b.gboxSuspended = isPackageSuspended(pm, GBOX);
+        } else {
+            b.gboxEnabled = false;
+            b.gboxLaunchable = false;
+            b.gboxSuspended = false;
+        }
 
         PackageInfo microg = packageInfo(pm, MICROG);
         b.microgInstalled = microg != null;
@@ -158,26 +185,31 @@ final class SystemSnapshot {
 
         PowerManager power = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
         if (power != null) {
-            b.powerSaveMode = power.isPowerSaveMode();
-            b.deviceIdleMode = power.isDeviceIdleMode();
-            if (Build.VERSION.SDK_INT >= 29) {
-                try {
-                    b.thermalStatus = power.getCurrentThermalStatus();
-                } catch (RuntimeException ignored) {
-                    b.thermalStatus = PowerManager.THERMAL_STATUS_NONE;
-                }
+            try {
+                b.powerSaveMode = power.isPowerSaveMode();
+                b.deviceIdleMode = power.isDeviceIdleMode();
+                b.deviceInteractive = power.isInteractive();
+                b.thermalStatus = power.getCurrentThermalStatus();
+                b.gboxBatteryExempt = b.gboxInstalled && batteryExempt(power, GBOX);
+                b.microgBatteryExempt = b.microgInstalled && batteryExempt(power, MICROG);
+            } catch (RuntimeException ignored) {
+                b.thermalStatus = -1;
             }
-            b.gboxBatteryExempt = b.gboxInstalled && batteryExempt(power, GBOX);
-            b.microgBatteryExempt = b.microgInstalled && batteryExempt(power, MICROG);
         }
 
         ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
         if (am != null) {
-            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
-            am.getMemoryInfo(info);
-            b.totalRamMb = bytesToMb(info.totalMem);
-            b.availableRamMb = bytesToMb(info.availMem);
-            b.lowMemory = info.lowMemory;
+            try {
+                ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+                am.getMemoryInfo(info);
+                b.totalRamMb = bytesToMb(info.totalMem);
+                b.availableRamMb = bytesToMb(info.availMem);
+                b.lowMemory = info.lowMemory;
+                b.lowRamDevice = am.isLowRamDevice();
+            } catch (RuntimeException ignored) {
+                b.totalRamMb = 0L;
+                b.availableRamMb = 0L;
+            }
         }
 
         try {
@@ -194,16 +226,18 @@ final class SystemSnapshot {
             try {
                 Network network = cm.getActiveNetwork();
                 NetworkCapabilities caps = network == null ? null : cm.getNetworkCapabilities(network);
+                b.networkObserved = true;
                 b.networkPresent = network != null && caps != null;
                 if (caps != null) {
                     b.networkInternetCapable = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
                     b.networkValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
                     b.networkWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
                     b.networkVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+                    b.networkCaptivePortal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL);
                 }
                 b.networkMetered = cm.isActiveNetworkMetered();
             } catch (RuntimeException ignored) {
-                b.networkPresent = false;
+                b.networkObserved = false;
             }
         }
 
@@ -222,17 +256,24 @@ final class SystemSnapshot {
         b.autoTime = readGlobalInt(app, Settings.Global.AUTO_TIME);
         b.autoTimeZone = readGlobalInt(app, Settings.Global.AUTO_TIME_ZONE);
 
-        Intent battery = app.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        if (battery != null) {
-            int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
-            int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-            if (level >= 0 && scale > 0) {
-                b.batteryPercent = Math.round((level * 100f) / scale);
+        try {
+            Intent battery = app.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (battery != null) {
+                int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                if (level >= 0 && scale > 0) {
+                    b.batteryPercent = Math.round((level * 100f) / scale);
+                }
+                int tenths = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                if (tenths != Integer.MIN_VALUE) {
+                    b.batteryTempC = tenths / 10f;
+                }
+                int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN);
+                b.batteryCharging = status == BatteryManager.BATTERY_STATUS_CHARGING
+                        || status == BatteryManager.BATTERY_STATUS_FULL;
             }
-            int tenths = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
-            if (tenths != Integer.MIN_VALUE) {
-                b.batteryTempC = tenths / 10f;
-            }
+        } catch (RuntimeException ignored) {
+            // Keep unknown defaults.
         }
 
         return b.build();
@@ -273,6 +314,22 @@ final class SystemSnapshot {
         }
     }
 
+    private static Intent safeLaunchIntent(PackageManager pm, String pkg) {
+        try {
+            return pm.getLaunchIntentForPackage(pkg);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isPackageSuspended(PackageManager pm, String pkg) {
+        try {
+            return pm.isPackageSuspended(pkg);
+        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+            return false;
+        }
+    }
+
     private static String installer(PackageManager pm, String pkg) {
         try {
             if (Build.VERSION.SDK_INT >= 30) {
@@ -307,6 +364,9 @@ final class SystemSnapshot {
 
     static final class Builder {
         boolean gboxInstalled = true;
+        boolean gboxEnabled = true;
+        boolean gboxLaunchable = true;
+        boolean gboxSuspended = false;
         String gboxVersion = "test";
         String gboxInstaller = "unknown";
         boolean microgInstalled = true;
@@ -328,34 +388,49 @@ final class SystemSnapshot {
         boolean microgBatteryExempt = true;
         boolean powerSaveMode = false;
         boolean deviceIdleMode = false;
+        boolean deviceInteractive = true;
         int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
         int batteryPercent = 50;
         float batteryTempC = 30f;
+        boolean batteryCharging = false;
         long totalRamMb = 8192;
         long availableRamMb = 4096;
         boolean lowMemory = false;
+        boolean lowRamDevice = false;
         long totalStorageMb = 128000;
         long freeStorageMb = 64000;
+        boolean networkObserved = true;
         boolean networkPresent = true;
         boolean networkInternetCapable = true;
         boolean networkValidated = true;
         boolean networkWifi = true;
         boolean networkVpn = false;
         boolean networkMetered = false;
+        boolean networkCaptivePortal = false;
         String webViewPackage = "com.huawei.webview";
         String webViewVersion = "test";
         int alwaysFinishActivities = 0;
         int autoTime = 1;
         int autoTimeZone = 1;
 
-        Builder gboxInstalled(boolean value) { gboxInstalled = value; return this; }
+        Builder gboxInstalled(boolean value) { gboxInstalled = value; if (!value) { gboxEnabled = false; gboxLaunchable = false; } return this; }
+        Builder gboxEnabled(boolean value) { gboxEnabled = value; return this; }
+        Builder gboxLaunchable(boolean value) { gboxLaunchable = value; return this; }
+        Builder gboxSuspended(boolean value) { gboxSuspended = value; return this; }
+        Builder networkObserved(boolean value) { networkObserved = value; return this; }
+        Builder networkPresent(boolean value) { networkPresent = value; return this; }
+        Builder networkInternetCapable(boolean value) { networkInternetCapable = value; return this; }
         Builder networkValidated(boolean value) { networkValidated = value; return this; }
+        Builder networkCaptivePortal(boolean value) { networkCaptivePortal = value; return this; }
         Builder powerSaveMode(boolean value) { powerSaveMode = value; return this; }
         Builder gboxBatteryExempt(boolean value) { gboxBatteryExempt = value; return this; }
         Builder lowMemory(boolean value) { lowMemory = value; return this; }
+        Builder lowRamDevice(boolean value) { lowRamDevice = value; return this; }
         Builder ram(long total, long available) { totalRamMb = total; availableRamMb = available; return this; }
         Builder storage(long total, long free) { totalStorageMb = total; freeStorageMb = free; return this; }
         Builder thermalStatus(int value) { thermalStatus = value; return this; }
+        Builder batteryTempC(float value) { batteryTempC = value; return this; }
+        Builder deviceIdleMode(boolean value) { deviceIdleMode = value; return this; }
         Builder alwaysFinishActivities(int value) { alwaysFinishActivities = value; return this; }
         Builder autoTime(int value) { autoTime = value; return this; }
         Builder autoTimeZone(int value) { autoTimeZone = value; return this; }
