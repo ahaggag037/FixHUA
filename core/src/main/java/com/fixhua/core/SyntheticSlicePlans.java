@@ -15,8 +15,9 @@ public final class SyntheticSlicePlans {
     public static final int CAPABILITY_READ_IMPORTED_ARTIFACT = 1001;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_IDENTITY = 1101;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_QUERY = 1102;
+    public static final int CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY = 1103;
     public static final String RECIPE_ID = "sample.synthetic.v1";
-    public static final int RECIPE_VERSION = 3;
+    public static final int RECIPE_VERSION = 4;
 
     private static CoreModels.ProviderDescriptor artifactProvider() {
         return new CoreModels.ProviderDescriptor(
@@ -63,6 +64,21 @@ public final class SyntheticSlicePlans {
                 0);
     }
 
+    private static CoreModels.ProviderDescriptor contextIdentityProvider() {
+        return new CoreModels.ProviderDescriptor(
+                "runtime.synthetic-context-identity",
+                "1",
+                P5_SYNTHETIC,
+                Set.of(CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY),
+                Set.of(CAPABILITY_SYNTHETIC_PACKAGE_QUERY),
+                Set.of(SYNTHETIC_VIEW),
+                EXACT,
+                SESSION,
+                false,
+                0,
+                0);
+    }
+
     public static CoreModels.ResolutionPlan artifactReadPlan()
             throws CapabilityResolver.ResolutionException {
         CoreModels.CapabilityRequest request = new CoreModels.CapabilityRequest(
@@ -76,13 +92,17 @@ public final class SyntheticSlicePlans {
     public static CoreModels.ResolutionPlan runtimeSessionPlan()
             throws CapabilityResolver.ResolutionException {
         CoreModels.CapabilityRequest request = new CoreModels.CapabilityRequest(
-                CAPABILITY_SYNTHETIC_PACKAGE_QUERY,
+                CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY,
                 Set.of(SYNTHETIC_VIEW),
                 EXACT,
                 false);
         return new CapabilityResolver().resolve(
                 request,
-                List.of(artifactProvider(), packageIdentityProvider(), packageQueryProvider()));
+                List.of(
+                        artifactProvider(),
+                        packageIdentityProvider(),
+                        packageQueryProvider(),
+                        contextIdentityProvider()));
     }
 
     private SyntheticSlicePlans() {}
