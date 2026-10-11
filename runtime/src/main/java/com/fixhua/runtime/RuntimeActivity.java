@@ -69,19 +69,13 @@ public final class RuntimeActivity extends Activity {
                         + " truth=" + identity.truthScope());
 
                 SyntheticPackageManagerView.QueryResult selfView = SyntheticPackageManagerView.query(
-                        service,
-                        session.sessionId(),
-                        session.artifactSha256(),
-                        session.planDigest(),
+                        service, session.sessionId(), session.artifactSha256(), session.planDigest(),
                         identity.packageName());
                 if (!selfView.found() || selfView.projection() == null) {
                     throw new SecurityException("Imported package missing from synthetic package view");
                 }
                 SyntheticPackageManagerView.QueryResult absentView = SyntheticPackageManagerView.query(
-                        service,
-                        session.sessionId(),
-                        session.artifactSha256(),
-                        session.planDigest(),
+                        service, session.sessionId(), session.artifactSha256(), session.planDigest(),
                         ABSENT_PACKAGE_PROBE);
                 if (absentView.found()) {
                     throw new SecurityException("Synthetic package view fabricated an unconfigured package");
@@ -120,20 +114,16 @@ public final class RuntimeActivity extends Activity {
         super.onCreate(savedInstanceState);
         RuntimeApp.assertReady("activityOnCreate");
         int createCount = CREATE_COUNT.incrementAndGet();
-
         status = new TextView(this);
         status.setPadding(32, 48, 32, 32);
         status.setText("Runtime UID: " + Process.myUid() + "\nConnecting to Controller…");
         setContentView(status);
-
         Log.i(TAG, "activityReady=true createCount=" + createCount
                 + " configGeneration=" + RuntimeApp.configurationGeneration()
                 + " orientation=" + getResources().getConfiguration().orientation);
-
         Intent intent = new Intent();
         intent.setComponent(new ComponentName(
-                "com.fixhua.guard",
-                "com.fixhua.guard.HostCapabilityBrokerService"));
+                "com.fixhua.guard", "com.fixhua.guard.HostCapabilityBrokerService"));
         bound = bindService(intent, connection, Context.BIND_AUTO_CREATE);
         if (!bound) {
             Log.e(TAG, "Controller bridge unavailable");
@@ -183,21 +173,35 @@ public final class RuntimeActivity extends Activity {
     private void runSessionArtifactProbe(IBinder broker, SessionArgs session) {
         RuntimeApp.assertReady("sessionArtifactProbe");
         try {
-            File image = RuntimeSessionArtifact.obtain(
+            File sourceImage = RuntimeSessionArtifact.obtain(
                     this, broker, session.sessionId(), session.artifactSha256(), session.planDigest());
-            RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this, image);
-            if (!session.artifactSha256().equalsIgnoreCase(result.artifactSha256())) {
-                throw new SecurityException("Loaded artifact differs from active session");
+            RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(
+                    this,
+                    sourceImage,
+                    broker,
+                    session.sessionId(),
+                    session.artifactSha256(),
+                    session.planDigest());
+            if (!session.artifactSha256().equalsIgnoreCase(result.sourceSha256())) {
+                throw new SecurityException("Loaded source artifact differs from active session");
+            }
+            if (!result.appViewMarker().contains(";gms=absent;")) {
+                throw new SecurityException("Transformed app did not consume synthetic package view");
             }
             Log.i(TAG, "sessionArtifact=true code=" + result.codeMarker()
                     + " resource=" + result.resourceMarker()
-                    + " sha256=" + result.artifactSha256()
-                    + " imageReadOnly=" + !image.canWrite());
-            status.append("\nSession artifact: verified");
+                    + " sourceSha256=" + result.sourceSha256()
+                    + " transformedSha256=" + result.transformedSha256()
+                    + " transformCallsites=" + result.rewrittenCallsites()
+                    + " appView=" + result.appViewMarker()
+                    + " sourceReadOnly=" + !sourceImage.canWrite());
+            status.append("\nSession source: verified");
+            status.append("\nDEX callsite transform: " + result.rewrittenCallsites());
+            status.append("\nForeign app view: " + result.appViewMarker());
             status.append("\nExternal APK code: " + result.codeMarker());
             status.append("\nExternal APK resource: " + result.resourceMarker());
-            status.append("\nArtifact SHA-256: " + result.artifactSha256().substring(0, 12) + "…");
-            status.append("\nExecution image: read-only");
+            status.append("\nSource SHA-256: " + result.sourceSha256().substring(0, 12) + "…");
+            status.append("\nDerived image SHA-256: " + result.transformedSha256().substring(0, 12) + "…");
         } catch (Exception e) {
             Log.e(TAG, "sessionArtifact=false", e);
             status.append("\nSession artifact failed: " + e.getClass().getSimpleName());
