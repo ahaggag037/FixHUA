@@ -20,6 +20,7 @@ public final class RuntimeActivity extends Activity {
     private static final String TAG = "FixHUARuntime";
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
+    private static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
     private static final int SESSION_PROTOCOL_VERSION = 2;
     private static final AtomicInteger CREATE_COUNT = new AtomicInteger();
 
@@ -48,15 +49,18 @@ public final class RuntimeActivity extends Activity {
                         + "\nProtocol: " + protocol);
 
                 SessionArgs session = SessionArgs.from(getIntent());
+                if (session == null && protocol >= SESSION_PROTOCOL_VERSION) {
+                    session = queryActiveSession(service);
+                }
                 if (session != null) {
                     if (protocol < SESSION_PROTOCOL_VERSION) {
                         throw new SecurityException("Controller protocol does not support Runtime sessions");
                     }
                     runSessionArtifactProbe(service, session);
                 } else {
-                    // Temporary compatibility fallback for the pre-session CI path. New Controller
-                    // user flow always supplies a session-bound artifact. This fallback will be
-                    // removed once the CI bootstrap imports its sample through Controller storage.
+                    // Temporary compatibility fallback for the pre-session acceptance path. It is
+                    // retained only until CI populates Controller artifact storage before Runtime
+                    // launch; normal Controller-import flow creates an active session.
                     Log.w(TAG, "legacyArtifactFallback=true");
                     runLegacyArtifactProbe();
                 }
@@ -118,6 +122,32 @@ public final class RuntimeActivity extends Activity {
                 + " configGeneration=" + RuntimeApp.configurationGeneration());
     }
 
+    private SessionArgs queryActiveSession(IBinder broker) throws Exception {
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(BROKER_DESCRIPTOR);
+            boolean handled = broker.transact(TRANSACTION_GET_ACTIVE_SESSION, data, reply, 0);
+            if (!handled) throw new SecurityException("Controller did not handle active-session query");
+            reply.readException();
+            if (reply.readInt() == 0) return null;
+            SessionArgs session = new SessionArgs(
+                    reply.readString(),
+                    reply.readString(),
+                    reply.readString());
+            String packageName = reply.readString();
+            String recipeId = reply.readString();
+            int recipeVersion = reply.readInt();
+            Log.i(TAG, "activeSession=true package=" + packageName
+                    + " recipe=" + recipeId + ":" + recipeVersion
+                    + " sha256=" + session.artifactSha256());
+            return session;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
     private void runSessionArtifactProbe(IBinder broker, SessionArgs session) {
         RuntimeApp.assertReady("sessionArtifactProbe");
         try {
@@ -176,6 +206,14 @@ public final class RuntimeActivity extends Activity {
     }
 
     private record SessionArgs(String sessionId, String artifactSha256, String planDigest) {
+        SessionArgs {
+            if (sessionId == null || sessionId.isBlank() || sessionId.length() > 128) {
+                throw new SecurityException("Malformed Runtime session ID");
+            }
+            validateSha(artifactSha256, "artifactSha256");
+            validateSha(planDigest, "planDigest");
+        }
+
         static SessionArgs from(Intent intent) {
             if (intent == null) return null;
             String sessionId = intent.getStringExtra(EXTRA_SESSION_ID);
@@ -187,6 +225,16 @@ public final class RuntimeActivity extends Activity {
                 throw new SecurityException("Incomplete Runtime session envelope");
             }
             return new SessionArgs(sessionId, artifactSha256, planDigest);
+        }
+
+        private static void validateSha(String value, String field) {
+            if (value == null || value.length() != 64) throw new SecurityException("Malformed " + field);
+            for (int i = 0; i < value.length(); i++) {
+                char c = Character.toLowerCase(value.charAt(i));
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                    throw new SecurityException("Malformed " + field);
+                }
+            }
         }
     }
 }
