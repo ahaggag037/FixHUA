@@ -26,18 +26,19 @@ public final class SyntheticSlicePlansTest {
     }
 
     @Test
-    public void runtimeSessionPlanIncludesHostFactAndSyntheticReality() throws Exception {
+    public void runtimeSessionPlanIncludesHostFactSyntheticRealityAndSafeStub() throws Exception {
         ResolutionPlan first = SyntheticSlicePlans.runtimeSessionPlan();
         ResolutionPlan second = SyntheticSlicePlans.runtimeSessionPlan();
         assertEquals(first.digestSha256(), second.digestSha256());
-        assertEquals(6, first.steps().size());
+        assertEquals(7, first.steps().size());
 
         ResolutionStep hostFact = first.steps().get(0);
         ResolutionStep artifact = first.steps().get(1);
         ResolutionStep identity = first.steps().get(2);
         ResolutionStep query = first.steps().get(3);
         ResolutionStep contextIdentity = first.steps().get(4);
-        ResolutionStep slice = first.steps().get(5);
+        ResolutionStep safeStub = first.steps().get(5);
+        ResolutionStep slice = first.steps().get(6);
 
         assertEquals(SyntheticSlicePlans.CAPABILITY_HOST_GBOX_PACKAGE_FACT, hostFact.capabilityId());
         assertEquals("controller.host-gbox-package-fact", hostFact.providerId());
@@ -62,6 +63,11 @@ public final class SyntheticSlicePlansTest {
         assertEquals("runtime.synthetic-context-identity", contextIdentity.providerId());
         assertEquals(CoreModels.AuthorityPlane.P5_SYNTHETIC, contextIdentity.authorityPlane());
         assertEquals(CoreModels.TruthScope.SYNTHETIC_VIEW, contextIdentity.truthScope());
+
+        assertEquals(SyntheticSlicePlans.CAPABILITY_SAFE_STUB_PERMISSION, safeStub.capabilityId());
+        assertEquals("runtime.safe-stub-permission-v1", safeStub.providerId());
+        assertEquals(CoreModels.AuthorityPlane.P5_SYNTHETIC, safeStub.authorityPlane());
+        assertEquals(CoreModels.TruthScope.SYNTHETIC_VIEW, safeStub.truthScope());
 
         assertEquals(SyntheticSlicePlans.CAPABILITY_SYNTHETIC_SLICE_V1, slice.capabilityId());
         assertEquals("runtime.synthetic-slice-v1", slice.providerId());
