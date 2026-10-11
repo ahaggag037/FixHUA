@@ -1,8 +1,6 @@
 package com.fixhua.runtime;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.content.res.loader.ResourcesLoader;
 import android.content.res.loader.ResourcesProvider;
@@ -18,19 +16,10 @@ import java.lang.reflect.Method;
 import java.security.MessageDigest;
 
 final class RuntimeArtifactProbe {
-    private static final String SAMPLE_PACKAGE = "com.fixhua.sampletarget";
     private static final String SAMPLE_ENTRY = "com.fixhua.sampletarget.ProbeEntry";
     private static final String SAMPLE_R_STRING = "com.fixhua.sampletarget.R$string";
 
     record Result(String artifactSha256, String codeMarker, String resourceMarker) {}
-
-    static Result run(Context context) throws Exception {
-        PackageManager pm = context.getPackageManager();
-        ApplicationInfo info = pm.getApplicationInfo(SAMPLE_PACKAGE, 0);
-        File apk = new File(info.sourceDir);
-        if (!apk.isFile()) throw new IllegalStateException("Sample APK source is missing");
-        return run(context, apk);
-    }
 
     static Result run(Context context, File apk) throws Exception {
         if (Build.VERSION.SDK_INT < 30) {
