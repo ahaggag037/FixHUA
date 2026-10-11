@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
@@ -12,16 +13,21 @@ import android.os.Process;
 import android.util.Log;
 import android.widget.TextView;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 public final class RuntimeActivity extends Activity {
     private static final String TAG = "FixHUARuntime";
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
+    private static final AtomicInteger CREATE_COUNT = new AtomicInteger();
 
     private TextView status;
+    private boolean bound;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
+            RuntimeApp.assertReady("controllerBridgeConnected");
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             try {
@@ -56,23 +62,45 @@ public final class RuntimeActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        RuntimeApp.assertReady("activityOnCreate");
+        int createCount = CREATE_COUNT.incrementAndGet();
+
         status = new TextView(this);
         status.setPadding(32, 48, 32, 32);
         status.setText("Runtime UID: " + Process.myUid() + "\nConnecting to Controller…");
         setContentView(status);
 
+        Log.i(TAG, "activityReady=true createCount=" + createCount
+                + " configGeneration=" + RuntimeApp.configurationGeneration()
+                + " orientation=" + getResources().getConfiguration().orientation);
+
         Intent intent = new Intent();
         intent.setComponent(new ComponentName(
                 "com.fixhua.guard",
                 "com.fixhua.guard.HostCapabilityBrokerService"));
-        boolean started = bindService(intent, connection, Context.BIND_AUTO_CREATE);
-        if (!started) {
+        bound = bindService(intent, connection, Context.BIND_AUTO_CREATE);
+        if (!bound) {
             Log.e(TAG, "Controller bridge unavailable");
             status.setText("Runtime UID: " + Process.myUid() + "\nController bridge unavailable");
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        RuntimeApp.assertReady("activityOnResume");
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        RuntimeApp.assertReady("activityConfigurationChanged");
+        Log.i(TAG, "activityConfigChanged=true orientation=" + newConfig.orientation
+                + " configGeneration=" + RuntimeApp.configurationGeneration());
+    }
+
     private void runArtifactProbe() {
+        RuntimeApp.assertReady("artifactProbe");
         try {
             RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this);
             Log.i(TAG, "artifactProbe=true code=" + result.codeMarker()
@@ -89,9 +117,13 @@ public final class RuntimeActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        try {
-            unbindService(connection);
-        } catch (IllegalArgumentException ignored) {
+        RuntimeApp.assertReady("activityOnDestroy");
+        if (bound) {
+            try {
+                unbindService(connection);
+            } catch (IllegalArgumentException ignored) {
+            }
+            bound = false;
         }
         super.onDestroy();
     }
