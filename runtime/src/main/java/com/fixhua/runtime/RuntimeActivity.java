@@ -34,6 +34,7 @@ public final class RuntimeActivity extends Activity {
                 status.setText("Runtime UID: " + Process.myUid()
                         + "\nController bridge: authenticated"
                         + "\nProtocol: " + protocol);
+                runArtifactProbe();
             } catch (Exception e) {
                 Log.e(TAG, "bridgeAuthenticated=false", e);
                 status.setText("Runtime UID: " + Process.myUid()
@@ -68,6 +69,21 @@ public final class RuntimeActivity extends Activity {
         if (!started) {
             Log.e(TAG, "Controller bridge unavailable");
             status.setText("Runtime UID: " + Process.myUid() + "\nController bridge unavailable");
+        }
+    }
+
+    private void runArtifactProbe() {
+        try {
+            RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this);
+            Log.i(TAG, "artifactProbe=true code=" + result.codeMarker()
+                    + " resource=" + result.resourceMarker()
+                    + " sha256=" + result.artifactSha256());
+            status.append("\nExternal APK code: " + result.codeMarker());
+            status.append("\nExternal APK resource: " + result.resourceMarker());
+            status.append("\nArtifact SHA-256: " + result.artifactSha256().substring(0, 12) + "…");
+        } catch (Exception e) {
+            Log.e(TAG, "artifactProbe=false", e);
+            status.append("\nArtifact probe unavailable: " + e.getClass().getSimpleName());
         }
     }
 
