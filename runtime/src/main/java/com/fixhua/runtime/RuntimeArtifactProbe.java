@@ -17,6 +17,7 @@ import java.lang.reflect.Method;
 
 final class RuntimeArtifactProbe {
     private static final String SAMPLE_ENTRY = "com.fixhua.sampletarget.ProbeEntry";
+    private static final String SAMPLE_APPLICATION = "com.fixhua.sampletarget.SampleApplication";
     private static final String SAMPLE_R_STRING = "com.fixhua.sampletarget.R$string";
 
     record Result(
@@ -27,10 +28,14 @@ final class RuntimeArtifactProbe {
             int safeStubCallsites,
             int hostRedirectCallsites,
             int activityFacadeClasses,
+            int applicationFacadeClasses,
+            String applicationClassName,
+            String applicationMarker,
             String codeMarker,
             String appViewMarker,
             String resourceMarker,
             String screenCreateMarker,
+            ForeignApplicationSession applicationSession,
             ForeignScreenSession screenSession,
             ForeignActivitySession ordinaryActivitySession) {
         int rewrittenCallsites() {
@@ -91,9 +96,18 @@ final class RuntimeArtifactProbe {
             throw new SecurityException("R9 requires exactly one ordinary Activity facade target");
         }
 
-        File apk = activityTransform.image();
+        ApplicationFacadeTransformer.Result applicationTransform = ApplicationFacadeTransformer.transform(
+                context, activityTransform.image());
+        if (!activityTransform.imageSha256().equalsIgnoreCase(applicationTransform.inputSha256())) {
+            throw new SecurityException("Application facade input differs from Activity transform stage");
+        }
+        if (applicationTransform.rewrittenApplicationClasses() != 1) {
+            throw new SecurityException("R10 requires exactly one ordinary Application facade target");
+        }
+
+        File apk = applicationTransform.image();
         File optimized = new File(
-                context.getCodeCacheDir(), "sample-target-loader-" + activityTransform.imageSha256().substring(0, 12));
+                context.getCodeCacheDir(), "sample-target-loader-" + applicationTransform.imageSha256().substring(0, 12));
         if (!optimized.exists() && !optimized.mkdirs()) {
             throw new IllegalStateException("Cannot create runtime code cache");
         }
@@ -108,6 +122,32 @@ final class RuntimeArtifactProbe {
                 SyntheticPackageManagerView.query(
                         broker, sessionId, artifactSha256, planDigest, packageName);
 
+        SyntheticPackageManagerView.QueryResult selfPackage = packageQuery.query(syntheticPackageName);
+        if (!selfPackage.found() || selfPackage.projection() == null) {
+            throw new SecurityException("Synthetic package metadata disappeared before Application creation");
+        }
+        String applicationClassName = selfPackage.projection().applicationClassName();
+        if (applicationClassName == null || applicationClassName.isBlank()) {
+            throw new SecurityException("R10 sample requires a declared Application class");
+        }
+
+        // Application is always established before any imported Activity or probe execution.
+        ForeignApplicationSession applicationSession = ForeignApplicationSession.create(
+                classLoader,
+                hostActivity,
+                applicationClassName,
+                syntheticPackageName,
+                packageQuery);
+
+        Class<?> applicationClass = classLoader.loadClass(SAMPLE_APPLICATION);
+        Method applicationSnapshot = applicationClass.getMethod("snapshot");
+        String applicationMarker = (String) applicationSnapshot.invoke(null);
+        String expectedApplicationPrefix = "created=true;package=" + syntheticPackageName
+                + ";bridgePerm=denied;connectivity=host;bridgeBind=denied;";
+        if (applicationMarker == null || !applicationMarker.startsWith(expectedApplicationPrefix)) {
+            throw new SecurityException("Imported Application did not consume the restricted synthetic environment");
+        }
+
         Class<?> entry = classLoader.loadClass(SAMPLE_ENTRY);
         Method pureMarker = entry.getMethod("pureMarker");
         String codeMarker = (String) pureMarker.invoke(null);
@@ -116,7 +156,7 @@ final class RuntimeArtifactProbe {
         String appViewMarker;
         try (SyntheticExecutionScope.Scope ignored = SyntheticExecutionScope.install(
                 syntheticPackageName, packageQuery)) {
-            appViewMarker = (String) run.invoke(null, context);
+            appViewMarker = (String) run.invoke(null, applicationSession.application());
         }
 
         Class<?> rString = classLoader.loadClass(SAMPLE_R_STRING);
@@ -144,24 +184,32 @@ final class RuntimeArtifactProbe {
 
         ForeignScreenSession screenSession = ForeignScreenSession.load(
                 classLoader, syntheticPackageName, packageQuery);
-        String screenCreateMarker = screenSession.onCreate(context);
+        String screenCreateMarker = screenSession.onCreate(applicationSession.application());
 
         ForeignActivitySession ordinaryActivitySession = ForeignActivitySession.load(
-                classLoader, hostActivity, syntheticPackageName, packageQuery);
+                classLoader,
+                hostActivity,
+                applicationSession.application(),
+                syntheticPackageName,
+                packageQuery);
         ordinaryActivitySession.onCreate(null);
 
         return new Result(
                 callsiteTransform.sourceSha256(),
-                activityTransform.imageSha256(),
+                applicationTransform.imageSha256(),
                 callsiteTransform.packageManagerCallsites(),
                 callsiteTransform.contextIdentityCallsites(),
                 callsiteTransform.safeStubCallsites(),
                 callsiteTransform.hostRedirectCallsites(),
                 activityTransform.rewrittenActivityClasses(),
+                applicationTransform.rewrittenApplicationClasses(),
+                applicationClassName,
+                applicationMarker,
                 codeMarker,
                 appViewMarker,
                 resourceMarker,
                 screenCreateMarker,
+                applicationSession,
                 screenSession,
                 ordinaryActivitySession);
     }
