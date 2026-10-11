@@ -2,26 +2,33 @@ package com.fixhua.guard;
 
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Binder;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 import android.os.Parcelable;
 import android.os.RemoteException;
 
+import com.fixhua.core.SyntheticSlicePlans;
+
 import java.io.File;
 
 public final class HostCapabilityBrokerService extends Service {
     static final String DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
-    static final int PROTOCOL_VERSION = 4;
+    static final int PROTOCOL_VERSION = 5;
     static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     static final int TRANSACTION_OPEN_SESSION_ARTIFACT = IBinder.FIRST_CALL_TRANSACTION + 1;
     static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
     static final int TRANSACTION_GET_SYNTHETIC_PACKAGE_IDENTITY = IBinder.FIRST_CALL_TRANSACTION + 3;
     static final int TRANSACTION_QUERY_SYNTHETIC_PACKAGE = IBinder.FIRST_CALL_TRANSACTION + 4;
+    static final int TRANSACTION_EXECUTE_HOST_CAPABILITY = IBinder.FIRST_CALL_TRANSACTION + 5;
     private static final String EXPECTED_RUNTIME_PACKAGE = "com.fixhua.runtime";
+    private static final String GBOX_PACKAGE = "com.gbox.android";
     private static final String SYNTHETIC_TRUTH_SCOPE = "SYNTHETIC_VIEW";
+    private static final String HOST_REAL_TRUTH_SCOPE = "HOST_REAL";
 
     private final Binder bridge = new Binder() {
         @Override
@@ -133,6 +140,38 @@ public final class HostCapabilityBrokerService extends Service {
                 }
             }
 
+            if (code == TRANSACTION_EXECUTE_HOST_CAPABILITY) {
+                data.enforceInterface(DESCRIPTOR);
+                SessionRequest request = readSessionRequestPrefix(data);
+                int capabilityId = data.readInt();
+                enforceNoTrailingData(data);
+                try {
+                    new RuntimeSessionStore(HostCapabilityBrokerService.this).requireCapability(
+                            request.sessionId(),
+                            request.artifactSha256(),
+                            request.planDigest(),
+                            capabilityId);
+                    if (capabilityId != SyntheticSlicePlans.CAPABILITY_HOST_GBOX_PACKAGE_FACT) {
+                        throw new SecurityException(
+                                "Host capability has no bounded broker operation: " + capabilityId);
+                    }
+                    HostPackageFact fact = readHostPackageFact(GBOX_PACKAGE);
+                    reply.writeNoException();
+                    reply.writeInt(capabilityId);
+                    reply.writeString(HOST_REAL_TRUTH_SCOPE);
+                    reply.writeInt(fact.installed() ? 1 : 0);
+                    reply.writeString(fact.versionName());
+                    reply.writeLong(fact.versionCode());
+                    return true;
+                } catch (SecurityException failure) {
+                    throw failure;
+                } catch (Exception failure) {
+                    RemoteException remote = new RemoteException("Authorized host capability failed");
+                    remote.initCause(failure);
+                    throw remote;
+                }
+            }
+
             return super.onTransact(code, data, reply, flags);
         }
     };
@@ -140,6 +179,27 @@ public final class HostCapabilityBrokerService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return bridge;
+    }
+
+    private HostPackageFact readHostPackageFact(String packageName) {
+        PackageManager pm = getPackageManager();
+        try {
+            PackageInfo info;
+            if (Build.VERSION.SDK_INT >= 33) {
+                info = pm.getPackageInfo(
+                        packageName,
+                        PackageManager.PackageInfoFlags.of(0));
+            } else {
+                //noinspection deprecation
+                info = pm.getPackageInfo(packageName, 0);
+            }
+            return new HostPackageFact(
+                    true,
+                    info.versionName == null ? "" : info.versionName,
+                    info.getLongVersionCode());
+        } catch (PackageManager.NameNotFoundException missing) {
+            return new HostPackageFact(false, "", 0L);
+        }
     }
 
     private static void writeSessionEnvelope(Parcel reply, RuntimeSessionStore.Session session) {
@@ -224,4 +284,5 @@ public final class HostCapabilityBrokerService extends Service {
     }
 
     private record SessionRequest(String sessionId, String artifactSha256, String planDigest) {}
+    private record HostPackageFact(boolean installed, String versionName, long versionCode) {}
 }
