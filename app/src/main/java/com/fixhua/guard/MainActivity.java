@@ -23,6 +23,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class MainActivity extends Activity {
     private static final int REQUEST_BUGREPORT_ZIP = 4101;
     private static final int REQUEST_ARTIFACT_APK = 4102;
+    private static final String RUNTIME_PACKAGE = "com.fixhua.runtime";
+    private static final String RUNTIME_ACTIVITY = "com.fixhua.runtime.RuntimeActivity";
+    private static final String EXTRA_SESSION_ID = "com.fixhua.runtime.extra.SESSION_ID";
+    private static final String EXTRA_ARTIFACT_SHA256 = "com.fixhua.runtime.extra.ARTIFACT_SHA256";
+    private static final String EXTRA_PLAN_DIGEST = "com.fixhua.runtime.extra.PLAN_DIGEST";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicInteger refreshGeneration = new AtomicInteger();
@@ -178,7 +183,10 @@ public final class MainActivity extends Activity {
                             .setMessage(imported.reusedExistingArtifact()
                                     ? "هذا الـAPK موجود بالفعل بنفس SHA-256؛ تم استخدام النسخة المخزنة بدون تكرار."
                                     : "تم حفظ نسخة content-addressed للـAPK داخل التخزين الخاص بـFixHUA وجعلها read-only.")
-                            .setPositiveButton("حسنًا", null)
+                            .setPositiveButton(
+                                    "تشغيل داخل FixHUA Runtime",
+                                    (dialog, which) -> launchRuntimeSession(imported.runtimeSession()))
+                            .setNegativeButton("لاحقًا", null)
                             .show();
                 });
             } catch (Exception e) {
@@ -211,8 +219,40 @@ public final class MainActivity extends Activity {
         text.append("• Content address: ").append(record.contentAddress()).append('\n');
         text.append("• Store: Controller private + read-only artifact\n");
         text.append("• Controller code execution: ممنوع\n");
-        text.append("• الحالة التالية: جاهز لإنشاء Runtime Session وتمرير descriptor read-only.");
+        text.append("• Runtime Session: تم إنشاؤها ويمكن تشغيلها في Runtime UID منفصل.");
         return text.toString();
+    }
+
+    private void launchRuntimeSession(RuntimeSessionStore.Session session) {
+        if (session == null) {
+            Toast.makeText(this, "Runtime Session غير متاحة", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        int signatureMatch = getPackageManager().checkSignatures(getPackageName(), RUNTIME_PACKAGE);
+        if (signatureMatch != android.content.pm.PackageManager.SIGNATURE_MATCH) {
+            new AlertDialog.Builder(this)
+                    .setTitle("FixHUA Runtime غير جاهز")
+                    .setMessage("يجب تثبيت FixHUA Runtime المطابق والموقّع بنفس هوية Controller. تم إيقاف التشغيل بدل استخدام Runtime غير موثوق.")
+                    .setPositiveButton("حسنًا", null)
+                    .show();
+            return;
+        }
+
+        Intent runtime = new Intent()
+                .setClassName(RUNTIME_PACKAGE, RUNTIME_ACTIVITY)
+                .putExtra(EXTRA_SESSION_ID, session.sessionId())
+                .putExtra(EXTRA_ARTIFACT_SHA256, session.artifactSha256())
+                .putExtra(EXTRA_PLAN_DIGEST, session.planDigest());
+        try {
+            startActivity(runtime);
+        } catch (RuntimeException failure) {
+            new AlertDialog.Builder(this)
+                    .setTitle("تعذر تشغيل FixHUA Runtime")
+                    .setMessage(failure.getClass().getSimpleName() + ": " + String.valueOf(failure.getMessage()))
+                    .setPositiveButton("حسنًا", null)
+                    .show();
+        }
     }
 
     private void openBugreportPicker() {
