@@ -4,24 +4,38 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 
+import com.fixhua.core.CoreModels;
+import com.fixhua.core.ExecutionEvidence;
+import com.fixhua.core.SyntheticSlicePlans;
+
 /** Entry points used by transformed foreign bytecode. */
 public final class PackageManagerHooks {
-    /**
-     * Synthetic replacement for PackageManager#getPackageInfo(String,int).
-     * The host PackageManager argument is intentionally not consulted: transformed code must see
-     * the declared synthetic view or fail closed, never silently inherit host package visibility.
-     */
     public static PackageInfo getPackageInfo(
             PackageManager ignoredHostPackageManager,
             String packageName,
             int flags) throws PackageManager.NameNotFoundException {
         SyntheticExecutionScope.Environment environment = SyntheticExecutionScope.require();
+        String subject = "package:" + safeSubject(packageName);
         try {
             SyntheticPackageManagerView.QueryResult result = environment.packageQuery().query(packageName);
             if (!result.found() || result.projection() == null) {
+                ExecutionEvidenceEmitter.emit(
+                        SyntheticSlicePlans.CAPABILITY_SYNTHETIC_PACKAGE_QUERY,
+                        "runtime.synthetic-package-query",
+                        ExecutionEvidence.Decision.SYNTHETIC,
+                        CoreModels.TruthScope.SYNTHETIC_VIEW,
+                        subject,
+                        "NOT_FOUND");
                 throw new PackageManager.NameNotFoundException(packageName);
             }
             SyntheticPackageManagerView.PackageProjection projection = result.projection();
+            ExecutionEvidenceEmitter.emit(
+                    SyntheticSlicePlans.CAPABILITY_SYNTHETIC_PACKAGE_QUERY,
+                    "runtime.synthetic-package-query",
+                    ExecutionEvidence.Decision.SYNTHETIC,
+                    CoreModels.TruthScope.SYNTHETIC_VIEW,
+                    subject,
+                    "FOUND");
             PackageInfo info = new PackageInfo();
             info.packageName = projection.packageName();
             info.versionName = projection.versionName();
@@ -42,6 +56,12 @@ public final class PackageManagerHooks {
             wrapped.initCause(failure);
             throw wrapped;
         }
+    }
+
+    private static String safeSubject(String value) {
+        if (value == null || value.isBlank()) return "unknown";
+        String sanitized = value.replace('|', '_').replace('\n', '_').replace('\r', '_');
+        return sanitized.length() <= 120 ? sanitized : sanitized.substring(0, 120);
     }
 
     private PackageManagerHooks() {}
