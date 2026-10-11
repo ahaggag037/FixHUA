@@ -146,7 +146,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             adb install dist/FixHUA-Controller.apk
             adb install dist/FixHUA-Runtime.apk
             adb install dist/FixHUA-SampleTarget.apk
