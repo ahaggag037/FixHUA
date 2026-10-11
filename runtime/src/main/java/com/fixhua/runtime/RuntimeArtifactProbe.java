@@ -1,5 +1,6 @@
 package com.fixhua.runtime;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.res.Resources;
 import android.content.res.loader.ResourcesLoader;
@@ -25,11 +26,13 @@ final class RuntimeArtifactProbe {
             int contextIdentityCallsites,
             int safeStubCallsites,
             int hostRedirectCallsites,
+            int activityFacadeClasses,
             String codeMarker,
             String appViewMarker,
             String resourceMarker,
             String screenCreateMarker,
-            ForeignScreenSession screenSession) {
+            ForeignScreenSession screenSession,
+            ForeignActivitySession ordinaryActivitySession) {
         int rewrittenCallsites() {
             return packageManagerCallsites
                     + contextIdentityCallsites
@@ -49,6 +52,9 @@ final class RuntimeArtifactProbe {
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
         }
+        if (!(context instanceof Activity hostActivity)) {
+            throw new IllegalArgumentException("Runtime probe requires a host Activity");
+        }
         if (sourceApk == null || !sourceApk.isFile()) {
             throw new IllegalStateException("Runtime artifact is missing");
         }
@@ -59,26 +65,35 @@ final class RuntimeArtifactProbe {
             throw new SecurityException("Synthetic package identity is missing");
         }
 
-        DexCallsiteTransformer.Result transformed = DexCallsiteTransformer.transform(context, sourceApk);
-        if (!artifactSha256.equalsIgnoreCase(transformed.sourceSha256())) {
+        DexCallsiteTransformer.Result callsiteTransform = DexCallsiteTransformer.transform(context, sourceApk);
+        if (!artifactSha256.equalsIgnoreCase(callsiteTransform.sourceSha256())) {
             throw new SecurityException("Transform source differs from Controller-approved artifact");
         }
-        if (transformed.packageManagerCallsites() != 1) {
+        if (callsiteTransform.packageManagerCallsites() != 1) {
             throw new SecurityException("Slice V4 requires exactly one PackageManager callsite");
         }
-        if (transformed.contextIdentityCallsites() != 1) {
+        if (callsiteTransform.contextIdentityCallsites() != 1) {
             throw new SecurityException("Slice V4 requires exactly one Context identity callsite");
         }
-        if (transformed.safeStubCallsites() != 1) {
+        if (callsiteTransform.safeStubCallsites() != 1) {
             throw new SecurityException("Slice V4 requires exactly one permission SAFE_STUB callsite");
         }
-        if (transformed.hostRedirectCallsites() != 1) {
+        if (callsiteTransform.hostRedirectCallsites() != 1) {
             throw new SecurityException("Slice V4 requires exactly one typed host-service redirect callsite");
         }
 
-        File apk = transformed.image();
+        ActivityFacadeTransformer.Result activityTransform = ActivityFacadeTransformer.transform(
+                context, callsiteTransform.image());
+        if (!callsiteTransform.imageSha256().equalsIgnoreCase(activityTransform.inputSha256())) {
+            throw new SecurityException("Activity facade input differs from first transform stage");
+        }
+        if (activityTransform.rewrittenActivityClasses() != 1) {
+            throw new SecurityException("R9 requires exactly one ordinary Activity facade target");
+        }
+
+        File apk = activityTransform.image();
         File optimized = new File(
-                context.getCodeCacheDir(), "sample-target-loader-" + transformed.imageSha256().substring(0, 12));
+                context.getCodeCacheDir(), "sample-target-loader-" + activityTransform.imageSha256().substring(0, 12));
         if (!optimized.exists() && !optimized.mkdirs()) {
             throw new IllegalStateException("Cannot create runtime code cache");
         }
@@ -131,18 +146,24 @@ final class RuntimeArtifactProbe {
                 classLoader, syntheticPackageName, packageQuery);
         String screenCreateMarker = screenSession.onCreate(context);
 
+        ForeignActivitySession ordinaryActivitySession = ForeignActivitySession.load(
+                classLoader, hostActivity, syntheticPackageName, packageQuery);
+        ordinaryActivitySession.onCreate(null);
+
         return new Result(
-                transformed.sourceSha256(),
-                transformed.imageSha256(),
-                transformed.packageManagerCallsites(),
-                transformed.contextIdentityCallsites(),
-                transformed.safeStubCallsites(),
-                transformed.hostRedirectCallsites(),
+                callsiteTransform.sourceSha256(),
+                activityTransform.imageSha256(),
+                callsiteTransform.packageManagerCallsites(),
+                callsiteTransform.contextIdentityCallsites(),
+                callsiteTransform.safeStubCallsites(),
+                callsiteTransform.hostRedirectCallsites(),
+                activityTransform.rewrittenActivityClasses(),
                 codeMarker,
                 appViewMarker,
                 resourceMarker,
                 screenCreateMarker,
-                screenSession);
+                screenSession,
+                ordinaryActivitySession);
     }
 
     private RuntimeArtifactProbe() {}
