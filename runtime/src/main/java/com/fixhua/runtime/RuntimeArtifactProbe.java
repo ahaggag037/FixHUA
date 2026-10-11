@@ -39,10 +39,7 @@ final class RuntimeArtifactProbe {
             ForeignScreenSession screenSession,
             ForeignActivitySession ordinaryActivitySession) {
         int rewrittenCallsites() {
-            return packageManagerCallsites
-                    + contextIdentityCallsites
-                    + safeStubCallsites
-                    + hostRedirectCallsites;
+            return packageManagerCallsites + contextIdentityCallsites + safeStubCallsites + hostRedirectCallsites;
         }
     }
 
@@ -54,73 +51,41 @@ final class RuntimeArtifactProbe {
             String artifactSha256,
             String planDigest,
             String syntheticPackageName) throws Exception {
-        if (Build.VERSION.SDK_INT < 30) {
-            throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
-        }
-        if (!(context instanceof Activity hostActivity)) {
-            throw new IllegalArgumentException("Runtime probe requires a host Activity");
-        }
-        if (sourceApk == null || !sourceApk.isFile()) {
-            throw new IllegalStateException("Runtime artifact is missing");
-        }
-        if (sourceApk.canWrite()) {
-            throw new SecurityException("Runtime artifact must be read-only before transformation");
-        }
-        if (syntheticPackageName == null || syntheticPackageName.isBlank()) {
-            throw new SecurityException("Synthetic package identity is missing");
-        }
+        if (Build.VERSION.SDK_INT < 30) throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
+        if (!(context instanceof Activity hostActivity)) throw new IllegalArgumentException("Runtime probe requires a host Activity");
+        if (sourceApk == null || !sourceApk.isFile()) throw new IllegalStateException("Runtime artifact is missing");
+        if (sourceApk.canWrite()) throw new SecurityException("Runtime artifact must be read-only before transformation");
+        if (syntheticPackageName == null || syntheticPackageName.isBlank()) throw new SecurityException("Synthetic package identity is missing");
 
         DexCallsiteTransformer.Result callsiteTransform = DexCallsiteTransformer.transform(context, sourceApk);
         if (!artifactSha256.equalsIgnoreCase(callsiteTransform.sourceSha256())) {
             throw new SecurityException("Transform source differs from Controller-approved artifact");
         }
-        if (callsiteTransform.packageManagerCallsites() != 1) {
-            throw new SecurityException("Slice V4 requires exactly one PackageManager callsite");
-        }
-        if (callsiteTransform.contextIdentityCallsites() != 1) {
-            throw new SecurityException("Slice V4 requires exactly one Context identity callsite");
-        }
-        if (callsiteTransform.safeStubCallsites() != 1) {
-            throw new SecurityException("Slice V4 requires exactly one permission SAFE_STUB callsite");
-        }
-        if (callsiteTransform.hostRedirectCallsites() != 1) {
-            throw new SecurityException("Slice V4 requires exactly one typed host-service redirect callsite");
-        }
+        if (callsiteTransform.packageManagerCallsites() != 1) throw new SecurityException("Slice V4 requires exactly one PackageManager callsite");
+        if (callsiteTransform.contextIdentityCallsites() != 1) throw new SecurityException("Slice V4 requires exactly one Context identity callsite");
+        if (callsiteTransform.safeStubCallsites() != 1) throw new SecurityException("Slice V4 requires exactly one permission SAFE_STUB callsite");
+        if (callsiteTransform.hostRedirectCallsites() != 1) throw new SecurityException("Slice V4 requires exactly one typed host-service redirect callsite");
 
-        ActivityFacadeTransformer.Result activityTransform = ActivityFacadeTransformer.transform(
-                context, callsiteTransform.image());
+        ActivityFacadeTransformer.Result activityTransform = ActivityFacadeTransformer.transform(context, callsiteTransform.image());
         if (!callsiteTransform.imageSha256().equalsIgnoreCase(activityTransform.inputSha256())) {
             throw new SecurityException("Activity facade input differs from first transform stage");
         }
-        if (activityTransform.rewrittenActivityClasses() != 1) {
-            throw new SecurityException("R9 requires exactly one ordinary Activity facade target");
-        }
+        if (activityTransform.rewrittenActivityClasses() != 1) throw new SecurityException("R9 requires exactly one ordinary Activity facade target");
 
-        ApplicationFacadeTransformer.Result applicationTransform = ApplicationFacadeTransformer.transform(
-                context, activityTransform.image());
+        ApplicationFacadeTransformer.Result applicationTransform = ApplicationFacadeTransformer.transform(context, activityTransform.image());
         if (!activityTransform.imageSha256().equalsIgnoreCase(applicationTransform.inputSha256())) {
             throw new SecurityException("Application facade input differs from Activity transform stage");
         }
-        if (applicationTransform.rewrittenApplicationClasses() != 1) {
-            throw new SecurityException("R10 requires exactly one ordinary Application facade target");
-        }
+        if (applicationTransform.rewrittenApplicationClasses() != 1) throw new SecurityException("R10 requires exactly one ordinary Application facade target");
 
         File apk = applicationTransform.image();
-        File optimized = new File(
-                context.getCodeCacheDir(), "sample-target-loader-" + applicationTransform.imageSha256().substring(0, 12));
-        if (!optimized.exists() && !optimized.mkdirs()) {
-            throw new IllegalStateException("Cannot create runtime code cache");
-        }
+        File optimized = new File(context.getCodeCacheDir(), "sample-target-loader-" + applicationTransform.imageSha256().substring(0, 12));
+        if (!optimized.exists() && !optimized.mkdirs()) throw new IllegalStateException("Cannot create runtime code cache");
 
-        DexClassLoader classLoader = new DexClassLoader(
-                apk.getAbsolutePath(),
-                optimized.getAbsolutePath(),
-                null,
-                context.getClassLoader());
+        DexClassLoader classLoader = new DexClassLoader(apk.getAbsolutePath(), optimized.getAbsolutePath(), null, context.getClassLoader());
 
         SyntheticExecutionScope.PackageQueryBackend packageQuery = packageName ->
-                SyntheticPackageManagerView.query(
-                        broker, sessionId, artifactSha256, planDigest, packageName);
+                SyntheticPackageManagerView.query(broker, sessionId, artifactSha256, planDigest, packageName);
 
         SyntheticPackageManagerView.QueryResult selfPackage = packageQuery.query(syntheticPackageName);
         if (!selfPackage.found() || selfPackage.projection() == null) {
@@ -131,13 +96,8 @@ final class RuntimeArtifactProbe {
             throw new SecurityException("R10 sample requires a declared Application class");
         }
 
-        // Application is always established before any imported Activity or probe execution.
         ForeignApplicationSession applicationSession = ForeignApplicationSession.create(
-                classLoader,
-                hostActivity,
-                applicationClassName,
-                syntheticPackageName,
-                packageQuery);
+                classLoader, hostActivity, applicationClassName, syntheticPackageName, packageQuery);
 
         Class<?> applicationClass = classLoader.loadClass(SAMPLE_APPLICATION);
         Method applicationSnapshot = applicationClass.getMethod("snapshot");
@@ -147,6 +107,13 @@ final class RuntimeArtifactProbe {
         if (applicationMarker == null || !applicationMarker.startsWith(expectedApplicationPrefix)) {
             throw new SecurityException("Imported Application did not consume the restricted synthetic environment");
         }
+        requireMarker(applicationMarker, "guestData", "true");
+        requirePositiveMarker(applicationMarker, "fileState");
+        requirePositiveMarker(applicationMarker, "prefsState");
+        requireMarker(applicationMarker, "db", "true");
+        requireMarker(applicationMarker, "fileVisible", "true");
+        requireMarker(applicationMarker, "dataDirConsistent", "true");
+        requireMarker(applicationMarker, "filesPrivate", "true");
 
         Class<?> entry = classLoader.loadClass(SAMPLE_ENTRY);
         Method pureMarker = entry.getMethod("pureMarker");
@@ -154,8 +121,7 @@ final class RuntimeArtifactProbe {
 
         Method run = entry.getMethod("run", Context.class);
         String appViewMarker;
-        try (SyntheticExecutionScope.Scope ignored = SyntheticExecutionScope.install(
-                syntheticPackageName, packageQuery)) {
+        try (SyntheticExecutionScope.Scope ignored = SyntheticExecutionScope.install(syntheticPackageName, packageQuery)) {
             appViewMarker = (String) run.invoke(null, applicationSession.application());
         }
 
@@ -167,11 +133,9 @@ final class RuntimeArtifactProbe {
         try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(apk, ParcelFileDescriptor.MODE_READ_ONLY)) {
             provider = ResourcesProvider.loadFromApk(pfd);
         }
-
         ResourcesLoader loader = new ResourcesLoader();
         loader.addProvider(provider);
-        Resources resources = context.createConfigurationContext(
-                context.getResources().getConfiguration()).getResources();
+        Resources resources = context.createConfigurationContext(context.getResources().getConfiguration()).getResources();
         resources.addLoaders(loader);
         String resourceMarker;
         try {
@@ -182,36 +146,44 @@ final class RuntimeArtifactProbe {
             provider.close();
         }
 
-        ForeignScreenSession screenSession = ForeignScreenSession.load(
-                classLoader, syntheticPackageName, packageQuery);
+        ForeignScreenSession screenSession = ForeignScreenSession.load(classLoader, syntheticPackageName, packageQuery);
         String screenCreateMarker = screenSession.onCreate(applicationSession.application());
 
         ForeignActivitySession ordinaryActivitySession = ForeignActivitySession.load(
-                classLoader,
-                hostActivity,
-                applicationSession.application(),
-                syntheticPackageName,
-                packageQuery);
+                classLoader, hostActivity, applicationSession.application(), syntheticPackageName, packageQuery);
         ordinaryActivitySession.onCreate(null);
 
         return new Result(
-                callsiteTransform.sourceSha256(),
-                applicationTransform.imageSha256(),
-                callsiteTransform.packageManagerCallsites(),
-                callsiteTransform.contextIdentityCallsites(),
-                callsiteTransform.safeStubCallsites(),
-                callsiteTransform.hostRedirectCallsites(),
-                activityTransform.rewrittenActivityClasses(),
-                applicationTransform.rewrittenApplicationClasses(),
-                applicationClassName,
-                applicationMarker,
-                codeMarker,
-                appViewMarker,
-                resourceMarker,
-                screenCreateMarker,
-                applicationSession,
-                screenSession,
-                ordinaryActivitySession);
+                callsiteTransform.sourceSha256(), applicationTransform.imageSha256(),
+                callsiteTransform.packageManagerCallsites(), callsiteTransform.contextIdentityCallsites(),
+                callsiteTransform.safeStubCallsites(), callsiteTransform.hostRedirectCallsites(),
+                activityTransform.rewrittenActivityClasses(), applicationTransform.rewrittenApplicationClasses(),
+                applicationClassName, applicationMarker, codeMarker, appViewMarker, resourceMarker,
+                screenCreateMarker, applicationSession, screenSession, ordinaryActivitySession);
+    }
+
+    private static void requireMarker(String marker, String key, String expected) {
+        String actual = markerValue(marker, key);
+        if (!expected.equals(actual)) {
+            throw new SecurityException("R11 guest data invariant failed for " + key + ":" + actual);
+        }
+    }
+
+    private static void requirePositiveMarker(String marker, String key) {
+        String value = markerValue(marker, key);
+        try {
+            if (Integer.parseInt(value) <= 0) throw new NumberFormatException();
+        } catch (NumberFormatException invalid) {
+            throw new SecurityException("R11 guest data counter invalid for " + key + ":" + value);
+        }
+    }
+
+    private static String markerValue(String marker, String key) {
+        String prefix = key + "=";
+        for (String part : marker.split(";")) {
+            if (part.startsWith(prefix)) return part.substring(prefix.length());
+        }
+        return "missing";
     }
 
     private RuntimeArtifactProbe() {}
