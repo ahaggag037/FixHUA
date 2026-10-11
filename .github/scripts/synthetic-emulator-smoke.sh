@@ -54,13 +54,14 @@ cat dist/runtime-logcat.txt
 grep -q 'FixHUAAcceptance.*sessionReady=true package=com.fixhua.sampletarget' dist/runtime-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true phase=activityOnCreate' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=3' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=4' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*packageIdentityShim=true package=com.fixhua.sampletarget.*truth=SYNTHETIC_VIEW' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-logcat.txt
 if grep -q 'legacyArtifactFallback=true' dist/runtime-logcat.txt; then
   echo "Legacy artifact fallback must not exist" >&2
   false
 fi
-echo "SYNTHETIC_PACKAGE_IDENTITY_PASS"
+echo "SYNTHETIC_PACKAGE_MANAGER_VIEW_PASS"
 endstep
 
 step "Verify read-only session artifact loads code/resources"
@@ -85,6 +86,7 @@ cat dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*packageIdentityShim=true package=com.fixhua.sampletarget.*truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
   echo "Session artifact did not survive recreation" >&2
