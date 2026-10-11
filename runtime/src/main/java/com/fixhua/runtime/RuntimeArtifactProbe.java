@@ -23,11 +23,12 @@ final class RuntimeArtifactProbe {
             String transformedSha256,
             int packageManagerCallsites,
             int contextIdentityCallsites,
+            int safeStubCallsites,
             String codeMarker,
             String appViewMarker,
             String resourceMarker) {
         int rewrittenCallsites() {
-            return packageManagerCallsites + contextIdentityCallsites;
+            return packageManagerCallsites + contextIdentityCallsites + safeStubCallsites;
         }
     }
 
@@ -57,10 +58,13 @@ final class RuntimeArtifactProbe {
             throw new SecurityException("Transform source differs from Controller-approved artifact");
         }
         if (transformed.packageManagerCallsites() != 1) {
-            throw new SecurityException("Slice V2 requires exactly one PackageManager callsite");
+            throw new SecurityException("Slice V3 requires exactly one PackageManager callsite");
         }
         if (transformed.contextIdentityCallsites() != 1) {
-            throw new SecurityException("Slice V2 requires exactly one Context identity callsite");
+            throw new SecurityException("Slice V3 requires exactly one Context identity callsite");
+        }
+        if (transformed.safeStubCallsites() != 1) {
+            throw new SecurityException("Slice V3 requires exactly one permission SAFE_STUB callsite");
         }
 
         File apk = transformed.image();
@@ -117,6 +121,7 @@ final class RuntimeArtifactProbe {
                 transformed.imageSha256(),
                 transformed.packageManagerCallsites(),
                 transformed.contextIdentityCallsites(),
+                transformed.safeStubCallsites(),
                 codeMarker,
                 appViewMarker,
                 resourceMarker);
