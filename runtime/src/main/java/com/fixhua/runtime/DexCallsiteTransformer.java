@@ -40,33 +40,57 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * Creates a private derived execution APK while preserving the imported source artifact unchanged.
- * Slice V1 rewrites one narrowly-scoped PackageManager#getPackageInfo(String,int) call family.
+ * Slice V2 rewrites only explicitly declared compatibility callsites.
  */
 final class DexCallsiteTransformer {
-    private static final String TRANSFORM_ID = "pm-getPackageInfo-v1";
-    private static final String SOURCE_CLASS = "Landroid/content/pm/PackageManager;";
-    private static final String SOURCE_METHOD = "getPackageInfo";
-    private static final String SOURCE_RETURN = "Landroid/content/pm/PackageInfo;";
-    private static final List<String> SOURCE_PARAMS = List.of("Ljava/lang/String;", "I");
-    private static final ImmutableMethodReference HOOK_REFERENCE = new ImmutableMethodReference(
-            "Lcom/fixhua/runtime/PackageManagerHooks;",
-            SOURCE_METHOD,
-            List.of("Landroid/content/pm/PackageManager;", "Ljava/lang/String;", "I"),
-            SOURCE_RETURN);
+    private static final String TRANSFORM_ID = "pm-context-v2";
 
-    record Result(File image, int rewrittenCallsites, String sourceSha256, String imageSha256) {}
+    private static final String PM_SOURCE_CLASS = "Landroid/content/pm/PackageManager;";
+    private static final String PM_SOURCE_METHOD = "getPackageInfo";
+    private static final String PM_SOURCE_RETURN = "Landroid/content/pm/PackageInfo;";
+    private static final List<String> PM_SOURCE_PARAMS = List.of("Ljava/lang/String;", "I");
+    private static final ImmutableMethodReference PM_HOOK_REFERENCE = new ImmutableMethodReference(
+            "Lcom/fixhua/runtime/PackageManagerHooks;",
+            PM_SOURCE_METHOD,
+            List.of("Landroid/content/pm/PackageManager;", "Ljava/lang/String;", "I"),
+            PM_SOURCE_RETURN);
+
+    private static final String CONTEXT_SOURCE_CLASS = "Landroid/content/Context;";
+    private static final String CONTEXT_SOURCE_METHOD = "getPackageName";
+    private static final String CONTEXT_SOURCE_RETURN = "Ljava/lang/String;";
+    private static final ImmutableMethodReference CONTEXT_HOOK_REFERENCE = new ImmutableMethodReference(
+            "Lcom/fixhua/runtime/ContextHooks;",
+            CONTEXT_SOURCE_METHOD,
+            List.of("Landroid/content/Context;"),
+            CONTEXT_SOURCE_RETURN);
+
+    record Result(
+            File image,
+            int packageManagerCallsites,
+            int contextIdentityCallsites,
+            String sourceSha256,
+            String imageSha256) {
+        int rewrittenCallsites() {
+            return packageManagerCallsites + contextIdentityCallsites;
+        }
+    }
+
+    private record TargetCounts(int packageManager, int contextIdentity) {
+        int total() { return packageManager + contextIdentity; }
+    }
 
     static Result transform(Context context, File sourceApk) throws Exception {
         if (sourceApk == null || !sourceApk.isFile()) throw new IllegalStateException("Source APK missing");
         if (sourceApk.canWrite()) throw new SecurityException("Source APK must be immutable before transform");
         String sourceHash = sha256(sourceApk);
-        File directory = new File(context.getCodeCacheDir(), "transformed-images-v1");
+        File directory = new File(context.getCodeCacheDir(), "transformed-images-v2");
         if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("Cannot create transform directory");
         File output = new File(directory, sourceHash + "-" + TRANSFORM_ID + ".apk");
         File temp = new File(directory, output.getName() + ".tmp");
         if (temp.exists() && !temp.delete()) throw new IllegalStateException("Cannot reset transform temp");
 
-        AtomicInteger sourceCallsites = new AtomicInteger();
+        AtomicInteger packageManagerCallsites = new AtomicInteger();
+        AtomicInteger contextIdentityCallsites = new AtomicInteger();
         try (ZipFile input = new ZipFile(sourceApk);
              ZipOutputStream zipOut = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))) {
             Enumeration<? extends ZipEntry> entries = input.entries();
@@ -88,7 +112,11 @@ final class DexCallsiteTransformer {
                 outEntry.setTime(0L);
                 zipOut.putNextEntry(outEntry);
                 if (isDexEntry(entry.getName())) {
-                    rewriteDex(input.getInputStream(entry), zipOut, sourceCallsites);
+                    rewriteDex(
+                            input.getInputStream(entry),
+                            zipOut,
+                            packageManagerCallsites,
+                            contextIdentityCallsites);
                 } else {
                     try (InputStream in = new BufferedInputStream(input.getInputStream(entry))) { copy(in, zipOut); }
                 }
@@ -99,9 +127,9 @@ final class DexCallsiteTransformer {
             throw failure;
         }
 
-        if (sourceCallsites.get() <= 0) {
+        if (packageManagerCallsites.get() + contextIdentityCallsites.get() <= 0) {
             temp.delete();
-            throw new SecurityException("Expected PackageManager callsite was not found");
+            throw new SecurityException("No declared compatibility callsite was found");
         }
         if (output.exists() && !output.delete()) {
             temp.delete();
@@ -115,18 +143,29 @@ final class DexCallsiteTransformer {
             output.delete();
             throw new SecurityException("Cannot make transformed image read-only");
         }
-        return new Result(output, sourceCallsites.get(), sourceHash, sha256(output));
+        return new Result(
+                output,
+                packageManagerCallsites.get(),
+                contextIdentityCallsites.get(),
+                sourceHash,
+                sha256(output));
     }
 
-    private static void rewriteDex(InputStream raw, OutputStream destination, AtomicInteger sourceCallsites)
-            throws Exception {
+    private static void rewriteDex(
+            InputStream raw,
+            OutputStream destination,
+            AtomicInteger packageManagerCallsites,
+            AtomicInteger contextIdentityCallsites) throws Exception {
         File tempDex = File.createTempFile("fixhua-rewritten-", ".dex");
         try {
             DexFile dex;
             try (BufferedInputStream in = new BufferedInputStream(raw)) {
                 dex = com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile.fromInputStream(Opcodes.getDefault(), in);
             }
-            sourceCallsites.addAndGet(countTargetCallsites(dex));
+            TargetCounts counts = countTargetCallsites(dex);
+            packageManagerCallsites.addAndGet(counts.packageManager());
+            contextIdentityCallsites.addAndGet(counts.contextIdentity());
+
             RewriterModule module = new RewriterModule() {
                 @Override public Rewriter<Instruction> getInstructionRewriter(Rewriters rewriters) {
                     InstructionRewriter delegate = new InstructionRewriter(rewriters);
@@ -146,53 +185,95 @@ final class DexCallsiteTransformer {
         }
     }
 
-    private static int countTargetCallsites(DexFile dex) {
-        int count = 0;
+    private static TargetCounts countTargetCallsites(DexFile dex) {
+        int packageManager = 0;
+        int contextIdentity = 0;
         for (ClassDef classDef : dex.getClasses()) {
             for (Method method : classDef.getMethods()) {
                 MethodImplementation implementation = method.getImplementation();
                 if (implementation == null) continue;
                 for (Instruction instruction : implementation.getInstructions()) {
-                    if (isTargetInstruction(instruction)) count++;
+                    MethodReference reference = virtualReference(instruction);
+                    if (reference == null) continue;
+                    if (isPackageManagerTarget(reference)) packageManager++;
+                    else if (isContextIdentityTarget(reference)) contextIdentity++;
                 }
             }
         }
-        return count;
-    }
-
-    private static boolean isTargetInstruction(Instruction instruction) {
-        if (instruction instanceof Instruction35c call) {
-            return call.getOpcode() == Opcode.INVOKE_VIRTUAL && isTarget(call.getReference());
-        }
-        if (instruction instanceof Instruction3rc call) {
-            return call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE && isTarget(call.getReference());
-        }
-        return false;
+        return new TargetCounts(packageManager, contextIdentity);
     }
 
     private static Instruction rewriteInstruction(Instruction instruction) {
-        if (instruction instanceof Instruction35c call
-                && call.getOpcode() == Opcode.INVOKE_VIRTUAL && isTarget(call.getReference())) {
-            return new ImmutableInstruction35c(
-                    Opcode.INVOKE_STATIC, call.getRegisterCount(), call.getRegisterC(), call.getRegisterD(),
-                    call.getRegisterE(), call.getRegisterF(), call.getRegisterG(), HOOK_REFERENCE);
+        if (instruction instanceof Instruction35c call && call.getOpcode() == Opcode.INVOKE_VIRTUAL) {
+            MethodReference reference = asMethodReference(call.getReference());
+            ImmutableMethodReference hook = hookFor(reference);
+            if (hook != null) {
+                return new ImmutableInstruction35c(
+                        Opcode.INVOKE_STATIC,
+                        call.getRegisterCount(),
+                        call.getRegisterC(),
+                        call.getRegisterD(),
+                        call.getRegisterE(),
+                        call.getRegisterF(),
+                        call.getRegisterG(),
+                        hook);
+            }
         }
-        if (instruction instanceof Instruction3rc call
-                && call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE && isTarget(call.getReference())) {
-            return new ImmutableInstruction3rc(
-                    Opcode.INVOKE_STATIC_RANGE, call.getStartRegister(), call.getRegisterCount(), HOOK_REFERENCE);
+        if (instruction instanceof Instruction3rc call && call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE) {
+            MethodReference reference = asMethodReference(call.getReference());
+            ImmutableMethodReference hook = hookFor(reference);
+            if (hook != null) {
+                return new ImmutableInstruction3rc(
+                        Opcode.INVOKE_STATIC_RANGE,
+                        call.getStartRegister(),
+                        call.getRegisterCount(),
+                        hook);
+            }
         }
         return instruction;
     }
 
-    private static boolean isTarget(Object reference) {
-        if (!(reference instanceof MethodReference method)) return false;
-        if (!SOURCE_CLASS.equals(method.getDefiningClass()) || !SOURCE_METHOD.equals(method.getName())
-                || !SOURCE_RETURN.equals(method.getReturnType())) return false;
-        List<? extends CharSequence> parameters = method.getParameterTypes();
-        if (parameters.size() != SOURCE_PARAMS.size()) return false;
-        for (int i = 0; i < parameters.size(); i++) {
-            if (!SOURCE_PARAMS.get(i).contentEquals(parameters.get(i))) return false;
+    private static MethodReference virtualReference(Instruction instruction) {
+        if (instruction instanceof Instruction35c call && call.getOpcode() == Opcode.INVOKE_VIRTUAL) {
+            return asMethodReference(call.getReference());
+        }
+        if (instruction instanceof Instruction3rc call && call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE) {
+            return asMethodReference(call.getReference());
+        }
+        return null;
+    }
+
+    private static MethodReference asMethodReference(Object reference) {
+        return reference instanceof MethodReference method ? method : null;
+    }
+
+    private static ImmutableMethodReference hookFor(MethodReference method) {
+        if (method == null) return null;
+        if (isPackageManagerTarget(method)) return PM_HOOK_REFERENCE;
+        if (isContextIdentityTarget(method)) return CONTEXT_HOOK_REFERENCE;
+        return null;
+    }
+
+    private static boolean isPackageManagerTarget(MethodReference method) {
+        if (!PM_SOURCE_CLASS.equals(method.getDefiningClass())
+                || !PM_SOURCE_METHOD.equals(method.getName())
+                || !PM_SOURCE_RETURN.equals(method.getReturnType())) return false;
+        return parametersEqual(method.getParameterTypes(), PM_SOURCE_PARAMS);
+    }
+
+    private static boolean isContextIdentityTarget(MethodReference method) {
+        return CONTEXT_SOURCE_CLASS.equals(method.getDefiningClass())
+                && CONTEXT_SOURCE_METHOD.equals(method.getName())
+                && CONTEXT_SOURCE_RETURN.equals(method.getReturnType())
+                && method.getParameterTypes().isEmpty();
+    }
+
+    private static boolean parametersEqual(
+            List<? extends CharSequence> actual,
+            List<String> expected) {
+        if (actual.size() != expected.size()) return false;
+        for (int i = 0; i < actual.size(); i++) {
+            if (!expected.get(i).contentEquals(actual.get(i))) return false;
         }
         return true;
     }
