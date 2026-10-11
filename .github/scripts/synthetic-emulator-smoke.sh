@@ -9,8 +9,8 @@ on_error() {
   for f in dist/controller_uid.txt dist/runtime_uid.txt dist/sample_uid.txt dist/uid-boundary.txt; do
     [[ -f "$f" ]] && { echo "### $f"; cat "$f"; }
   done
-  [[ -f dist/runtime-logcat.txt ]] && tail -n 360 dist/runtime-logcat.txt || true
-  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 380 dist/runtime-lifecycle-logcat.txt || true
+  [[ -f dist/runtime-logcat.txt ]] && tail -n 420 dist/runtime-logcat.txt || true
+  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 420 dist/runtime-lifecycle-logcat.txt || true
   [[ -f dist/sample-logcat.txt ]] && tail -n 200 dist/sample-logcat.txt || true
   exit "$rc"
 }
@@ -53,14 +53,16 @@ cat dist/runtime-logcat.txt
 grep -q 'FixHUAAcceptance.*sessionReady=true package=com.fixhua.sampletarget' dist/runtime-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true phase=activityOnCreate' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=4' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=5' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*packageIdentityShim=true package=com.fixhua.sampletarget.*truth=SYNTHETIC_VIEW' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*outOfPlanDenied=true capability=9999' dist/runtime-logcat.txt
 if grep -q 'legacyArtifactFallback=true' dist/runtime-logcat.txt; then
   echo "Legacy artifact fallback must not exist" >&2
   false
 fi
-echo "SYNTHETIC_PACKAGE_MANAGER_VIEW_PASS"
+echo "PLAN_AUTHORIZED_HOST_CAPABILITY_PASS"
 endstep
 
 step "Verify DEX callsites drive foreign package and PackageManager perception"
@@ -75,7 +77,7 @@ fi
 echo "SYNTHETIC_CONTEXT_IDENTITY_PASS"
 endstep
 
-step "Verify lifecycle recreation preserves synthetic reality and transform"
+step "Verify lifecycle recreation preserves synthetic and host truths"
 adb logcat -c
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
@@ -87,6 +89,7 @@ cat dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
   echo "Transformed session did not survive recreation" >&2
