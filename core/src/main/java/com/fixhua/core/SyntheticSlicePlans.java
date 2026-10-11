@@ -18,9 +18,10 @@ public final class SyntheticSlicePlans {
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_IDENTITY = 1101;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_QUERY = 1102;
     public static final int CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY = 1103;
+    public static final int CAPABILITY_SAFE_STUB_PERMISSION = 1104;
     public static final int CAPABILITY_SYNTHETIC_SLICE_V1 = 1200;
     public static final String RECIPE_ID = "sample.synthetic.v1";
-    public static final int RECIPE_VERSION = 5;
+    public static final int RECIPE_VERSION = 6;
 
     private static CoreModels.ProviderDescriptor artifactProvider() {
         return new CoreModels.ProviderDescriptor(
@@ -97,13 +98,28 @@ public final class SyntheticSlicePlans {
                 0);
     }
 
+    private static CoreModels.ProviderDescriptor safeStubPermissionProvider() {
+        return new CoreModels.ProviderDescriptor(
+                "runtime.safe-stub-permission-v1",
+                "1",
+                P5_SYNTHETIC,
+                Set.of(CAPABILITY_SAFE_STUB_PERMISSION),
+                Set.of(CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY),
+                Set.of(SYNTHETIC_VIEW),
+                EXACT,
+                SESSION,
+                false,
+                0,
+                0);
+    }
+
     private static CoreModels.ProviderDescriptor sliceProvider() {
         return new CoreModels.ProviderDescriptor(
                 "runtime.synthetic-slice-v1",
                 "1",
                 P5_SYNTHETIC,
                 Set.of(CAPABILITY_SYNTHETIC_SLICE_V1),
-                Set.of(CAPABILITY_HOST_GBOX_PACKAGE_FACT, CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY),
+                Set.of(CAPABILITY_HOST_GBOX_PACKAGE_FACT, CAPABILITY_SAFE_STUB_PERMISSION),
                 Set.of(SYNTHETIC_VIEW),
                 EXACT,
                 SESSION,
@@ -137,6 +153,7 @@ public final class SyntheticSlicePlans {
                         packageIdentityProvider(),
                         packageQueryProvider(),
                         contextIdentityProvider(),
+                        safeStubPermissionProvider(),
                         sliceProvider()));
     }
 
