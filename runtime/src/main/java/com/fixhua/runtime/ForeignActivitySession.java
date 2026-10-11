@@ -1,6 +1,7 @@
 package com.fixhua.runtime;
 
 import android.app.Activity;
+import android.app.Application;
 import android.os.Bundle;
 
 import com.fixhua.core.CoreModels;
@@ -29,8 +30,10 @@ final class ForeignActivitySession {
     static ForeignActivitySession load(
             ClassLoader classLoader,
             Activity host,
+            Application syntheticApplication,
             String syntheticPackageName,
             SyntheticExecutionScope.PackageQueryBackend packageQuery) throws Exception {
+        if (syntheticApplication == null) throw new IllegalArgumentException("syntheticApplication");
         Class<?> activityClass = classLoader.loadClass(ACTIVITY_CLASS);
         Object instance = activityClass.getConstructor().newInstance();
         if (!(instance instanceof SyntheticActivityFacade facade)) {
@@ -40,7 +43,7 @@ final class ForeignActivitySession {
                 facade, syntheticPackageName, packageQuery);
         try (SyntheticExecutionScope.Scope ignored = SyntheticExecutionScope.install(
                 syntheticPackageName, packageQuery)) {
-            facade.fixhuaAttachHost(host);
+            facade.fixhuaAttachHost(host, syntheticApplication);
         }
         return session;
     }
@@ -76,7 +79,7 @@ final class ForeignActivitySession {
     private static void emit(String phase, String outcome) {
         ExecutionEvidenceEmitter.emit(
                 SyntheticSlicePlans.CAPABILITY_SYNTHETIC_SLICE_V1,
-                "runtime.ordinary-activity-session-v1",
+                "runtime.ordinary-activity-session-v2",
                 ExecutionEvidence.Decision.SHIM,
                 CoreModels.TruthScope.SYNTHETIC_VIEW,
                 "ordinary-activity:" + phase,
