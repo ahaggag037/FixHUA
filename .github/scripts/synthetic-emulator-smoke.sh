@@ -63,16 +63,16 @@ fi
 echo "SYNTHETIC_PACKAGE_MANAGER_VIEW_PASS"
 endstep
 
-step "Verify DEX callsite transform drives foreign app perception"
+step "Verify DEX callsites drive foreign package and PackageManager perception"
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=1' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*appView=.*gms=absent' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*sourceReadOnly=true' dist/runtime-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-logcat.txt; then
   echo "Transformed session artifact verification failed" >&2
   false
 fi
-echo "DEX_CALLSITE_TRANSFORM_PASS"
+echo "SYNTHETIC_CONTEXT_IDENTITY_PASS"
 endstep
 
 step "Verify lifecycle recreation preserves synthetic reality and transform"
@@ -87,7 +87,7 @@ cat dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=1.*appView=.*gms=absent' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
   echo "Transformed session did not survive recreation" >&2
   false
