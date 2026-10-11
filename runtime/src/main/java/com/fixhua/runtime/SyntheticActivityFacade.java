@@ -12,22 +12,21 @@ import com.fixhua.core.CoreModels;
 import com.fixhua.core.ExecutionEvidence;
 import com.fixhua.core.SyntheticSlicePlans;
 
-/**
- * Public-API facade used as the rewritten superclass of imported ordinary Activities. The object is
- * never registered with ActivityThread. A real Runtime-owned Activity supplies window/UI/lifecycle,
- * while this facade exposes only the bounded behavior FixHUA has modeled.
- */
+/** Public-API facade used as the rewritten superclass of imported ordinary Activities. */
 public class SyntheticActivityFacade extends Activity {
     private Activity hostActivity;
     private Application syntheticApplication;
 
     public final void fixhuaAttachHost(Activity host, Application application) {
         if (host == null) throw new IllegalArgumentException("host");
-        if (application == null) throw new IllegalArgumentException("application");
+        if (!(application instanceof SyntheticApplicationFacade syntheticApp)) {
+            throw new IllegalArgumentException("application must be a FixHUA synthetic Application");
+        }
         if (hostActivity != null) throw new IllegalStateException("Facade already attached");
         hostActivity = host;
         syntheticApplication = application;
-        super.attachBaseContext(new SyntheticRestrictedContext(host, application));
+        super.attachBaseContext(new SyntheticRestrictedContext(
+                host, application, syntheticApp.fixhuaDataPlane()));
         emit("attach", "READY");
     }
 
@@ -55,29 +54,22 @@ public class SyntheticActivityFacade extends Activity {
         return super.getApplicationContext();
     }
 
-    /**
-     * Super target for transformed `invoke-super Activity.onCreate` calls. This facade instance is
-     * deliberately not registered with ActivityThread, so calling Activity.onCreate() would enter a
-     * framework lifecycle for an unattached Activity and violate the proxy ownership model.
-     */
     @Override
     @SuppressLint("MissingSuperCall")
     protected void onCreate(Bundle state) {
-        // Intentionally no framework super-call; RuntimeActivity owns the real Android lifecycle.
+        // RuntimeActivity owns the real Android lifecycle.
     }
 
-    /** Super target for transformed `invoke-super Activity.onResume` calls. */
     @Override
     @SuppressLint("MissingSuperCall")
     protected void onResume() {
-        // Intentionally no framework super-call; RuntimeActivity owns the real Android lifecycle.
+        // RuntimeActivity owns the real Android lifecycle.
     }
 
-    /** Super target for transformed `invoke-super Activity.onDestroy` calls. */
     @Override
     @SuppressLint("MissingSuperCall")
     protected void onDestroy() {
-        // Intentionally no framework super-call; RuntimeActivity owns the real Android lifecycle.
+        // RuntimeActivity owns the real Android lifecycle.
     }
 
     @Override
