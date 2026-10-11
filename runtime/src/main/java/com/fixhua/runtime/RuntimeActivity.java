@@ -9,9 +9,11 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.Process;
+import android.util.Log;
 import android.widget.TextView;
 
 public final class RuntimeActivity extends Activity {
+    private static final String TAG = "FixHUARuntime";
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
 
@@ -28,10 +30,12 @@ public final class RuntimeActivity extends Activity {
                 if (!handled) throw new IllegalStateException("Controller rejected protocol request");
                 reply.readException();
                 int protocol = reply.readInt();
+                Log.i(TAG, "bridgeAuthenticated=true protocol=" + protocol + " runtimeUid=" + Process.myUid());
                 status.setText("Runtime UID: " + Process.myUid()
                         + "\nController bridge: authenticated"
                         + "\nProtocol: " + protocol);
             } catch (Exception e) {
+                Log.e(TAG, "bridgeAuthenticated=false", e);
                 status.setText("Runtime UID: " + Process.myUid()
                         + "\nController bridge failed: " + e.getClass().getSimpleName()
                         + ": " + String.valueOf(e.getMessage()));
@@ -43,6 +47,7 @@ public final class RuntimeActivity extends Activity {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+            Log.w(TAG, "Controller bridge disconnected");
             status.setText("Runtime UID: " + Process.myUid() + "\nController bridge disconnected");
         }
     };
@@ -61,6 +66,7 @@ public final class RuntimeActivity extends Activity {
                 "com.fixhua.guard.HostCapabilityBrokerService"));
         boolean started = bindService(intent, connection, Context.BIND_AUTO_CREATE);
         if (!started) {
+            Log.e(TAG, "Controller bridge unavailable");
             status.setText("Runtime UID: " + Process.myUid() + "\nController bridge unavailable");
         }
     }
