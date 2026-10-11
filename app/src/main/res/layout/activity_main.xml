@@ -103,6 +103,15 @@
             android:textAllCaps="false" />
 
         <Button
+            android:id="@+id/importBugreport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:minHeight="52dp"
+            android:text="تحليل Full Bug Report محليًا"
+            android:textAllCaps="false" />
+
+        <Button
             android:id="@+id/shareReport"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -125,7 +134,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:paddingBottom="24dp"
-            android:text="ملاحظة: FixHUA لا يغيّر هوية الجهاز ولا يتجاوز فحوص الأمان، ولا يعتبر غياب Google Services Framework على النظام المضيف خطأً بحد ذاته عند استخدام GBox."
+            android:text="ملاحظة: FixHUA لا يغيّر هوية الجهاز ولا يتجاوز فحوص الأمان، ولا يعتبر غياب Google Services Framework على النظام المضيف خطأً بحد ذاته عند استخدام GBox. تحليل Bug Report يتم محليًا ويستخرج حقائق توافق محددة فقط."
             android:textSize="13sp" />
 
     </LinearLayout>
