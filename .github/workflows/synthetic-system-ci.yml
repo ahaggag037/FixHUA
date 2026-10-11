@@ -11,6 +11,7 @@ on:
       - 'sample-target/**'
       - 'app/**'
       - 'research/**'
+      - '.github/scripts/**'
       - '.github/workflows/synthetic-system-ci.yml'
 
 jobs:
@@ -145,38 +146,10 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            adb install dist/FixHUA-Controller.apk
-            adb install dist/FixHUA-Runtime.apk
-            adb install dist/FixHUA-SampleTarget.apk
-            adb shell dumpsys package com.fixhua.guard | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1 | tr -d '\r' > dist/controller_uid.txt
-            adb shell dumpsys package com.fixhua.runtime | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1 | tr -d '\r' > dist/runtime_uid.txt
-            adb shell dumpsys package com.fixhua.sampletarget | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1 | tr -d '\r' > dist/sample_uid.txt
-            test -s dist/controller_uid.txt
-            test -s dist/runtime_uid.txt
-            test -s dist/sample_uid.txt
-            test "$(cat dist/controller_uid.txt)" != "$(cat dist/runtime_uid.txt)"
-            test "$(cat dist/controller_uid.txt)" != "$(cat dist/sample_uid.txt)"
-            test "$(cat dist/runtime_uid.txt)" != "$(cat dist/sample_uid.txt)"
-            paste -d ' ' dist/controller_uid.txt dist/runtime_uid.txt dist/sample_uid.txt > dist/uid-boundary.txt
-            cat dist/uid-boundary.txt
-            adb logcat -c
-            adb shell am start -W -n com.fixhua.guard/.MainActivity >/dev/null
-            adb shell am start -W -n com.fixhua.runtime/.RuntimeActivity >/dev/null
-            sleep 3
-            adb logcat -d -v brief > dist/runtime-logcat.txt
-            cat dist/runtime-logcat.txt
-            grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=1' dist/runtime-logcat.txt
-            grep -q 'FixHUARuntime.*artifactProbe=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
-            adb logcat -c
-            adb shell am start -W -n com.fixhua.sampletarget/.SampleActivity >/dev/null
-            sleep 2
-            adb logcat -d -v brief > dist/sample-logcat.txt
-            cat dist/sample-logcat.txt
-            grep -q 'FixHUASample.*bridgeDenied=true' dist/sample-logcat.txt
-            ! grep -q 'SECURITY_FAILURE' dist/sample-logcat.txt
+          script: bash .github/scripts/synthetic-emulator-smoke.sh
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: FixHUA-Synthetic-System-CI
           path: |
@@ -186,4 +159,4 @@ jobs:
             app/build/reports/lint-results-release.html
             runtime/build/reports/lint-results-release.html
             sample-target/build/reports/lint-results-release.html
-          if-no-files-found: error
+          if-no-files-found: warn
