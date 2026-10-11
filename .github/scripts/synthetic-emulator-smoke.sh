@@ -9,9 +9,9 @@ on_error() {
   for f in dist/controller_uid.txt dist/runtime_uid.txt dist/sample_uid.txt dist/uid-boundary.txt; do
     [[ -f "$f" ]] && { echo "### $f"; cat "$f"; }
   done
-  [[ -f dist/runtime-logcat.txt ]] && tail -n 520 dist/runtime-logcat.txt || true
-  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 520 dist/runtime-lifecycle-logcat.txt || true
-  [[ -f dist/runtime-recovery-logcat.txt ]] && tail -n 560 dist/runtime-recovery-logcat.txt || true
+  [[ -f dist/runtime-logcat.txt ]] && tail -n 560 dist/runtime-logcat.txt || true
+  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 560 dist/runtime-lifecycle-logcat.txt || true
+  [[ -f dist/runtime-recovery-logcat.txt ]] && tail -n 620 dist/runtime-recovery-logcat.txt || true
   [[ -f dist/sample-logcat.txt ]] && tail -n 200 dist/sample-logcat.txt || true
   exit "$rc"
 }
@@ -68,7 +68,7 @@ endstep
 
 step "Verify DEX callsites synthesize identity, safe-stub permission and delegate connectivity"
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*activityFacadeClasses=1' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*sourceReadOnly=true' dist/runtime-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-logcat.txt; then
@@ -80,6 +80,22 @@ source_sha="$(grep -m1 'FixHUARuntime.*sessionArtifact=true' dist/runtime-logcat
 [[ ${#source_sha} -eq 64 ]]
 printf '%s\n' "$source_sha" > dist/session-source-sha256.txt
 echo "SYNTHETIC_AND_HOST_REDIRECT_VIEW_PASS"
+endstep
+
+step "Verify ordinary imported Activity facade, UI and restricted Context"
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onCreate facade=true' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onResume facade=true' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.activity-facade-v1.*subject=activity-facade:attach.*outcome=READY' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.activity-facade-v1.*subject=activity-facade:setContentView.*outcome=DELIVERED' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.ordinary-activity-session-v1.*subject=ordinary-activity:onCreate.*outcome=DELIVERED' dist/runtime-logcat.txt
+grep -q 'FixHUASample.*hostBaseline=true package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;context=com.fixhua.sampletarget.SampleActivity' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.restricted-context-v1.*decision=UNSUPPORTED.*subject=bind-service.*outcome=DENIED:com.fixhua.guard/.HostCapabilityBrokerService' dist/runtime-logcat.txt
+grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/runtime-logcat.txt
+if grep -q 'SECURITY_FAILURE' dist/runtime-logcat.txt; then
+  echo "Imported ordinary Activity inherited forbidden Runtime-family bridge authority" >&2
+  false
+fi
+echo "ORDINARY_ACTIVITY_FACADE_SECURITY_PASS"
 endstep
 
 step "Verify imported screen ProxyActivity lifecycle and typed evidence stream"
@@ -95,7 +111,7 @@ grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onResume' dist/r
 echo "STRUCTURED_EXECUTION_EVIDENCE_PASS"
 endstep
 
-step "Verify lifecycle recreation preserves synthetic, safe-stub, delegated and host truths"
+step "Verify lifecycle recreation preserves ordinary Activity and synthetic reality"
 adb logcat -c
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
@@ -108,7 +124,13 @@ grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lif
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-lifecycle-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*activityFacadeClasses=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onDestroy facade=true' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onCreate facade=true' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onResume facade=true' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.activity-facade-v1.*subject=activity-facade:setContentView.*outcome=DELIVERED' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.restricted-context-v1.*subject=bind-service.*outcome=DENIED:com.fixhua.guard/.HostCapabilityBrokerService' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onDestroy' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onCreate marker=create=1;resume=0;config=0;destroy=0' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onResume marker=create=1;resume=1;config=0;destroy=0' dist/runtime-lifecycle-logcat.txt
@@ -116,6 +138,10 @@ grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onDestroy' dist/
 grep -q 'FixHUAEvidence.*decision=DELEGATED.*subject=system-service:connectivity.*outcome=PRESENT' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
   echo "Transformed session did not survive recreation" >&2
+  false
+fi
+if grep -q 'SECURITY_FAILURE' dist/runtime-lifecycle-logcat.txt; then
+  echo "Recreated ordinary Activity inherited forbidden bridge authority" >&2
   false
 fi
 max_create_count="$(grep -o 'FixHUARuntime.*activityReady=true createCount=[0-9]*' dist/runtime-lifecycle-logcat.txt | sed 's/.*createCount=//' | sort -n | tail -n 1)"
@@ -127,7 +153,7 @@ echo "LIFECYCLE_SYNTHETIC_REALITY_PASS createCount=$max_create_count"
 adb shell settings put system accelerometer_rotation 1 || true
 endstep
 
-step "Verify Runtime process-death recovery from Controller-owned session"
+step "Verify Runtime process-death recovery rebuilds ordinary Activity"
 adb logcat -c
 runtime_pid_before="$(adb shell pidof com.fixhua.runtime | tr -d '\r')"
 [[ -n "$runtime_pid_before" ]]
@@ -151,13 +177,18 @@ grep -q "FixHUARuntime.*activeSession=true.*sha256=$source_sha" dist/runtime-rec
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*activityFacadeClasses=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-recovery-logcat.txt
 grep -q "FixHUARuntime.*sessionArtifact=true.*sourceSha256=$source_sha" dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onCreate facade=true' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onResume facade=true' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.activity-facade-v1.*subject=activity-facade:setContentView.*outcome=DELIVERED' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUAEvidence.*provider=runtime.restricted-context-v1.*subject=bind-service.*outcome=DENIED:com.fixhua.guard/.HostCapabilityBrokerService' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onCreate marker=create=1;resume=0;config=0;destroy=0' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onResume marker=create=1;resume=1;config=0;destroy=0' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUAEvidence.*decision=SAFE_STUB.*outcome=DENIED' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUAEvidence.*decision=DELEGATED.*subject=system-service:connectivity.*outcome=PRESENT' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onResume' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SHIM.*subject=ordinary-activity:onResume' dist/runtime-recovery-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-recovery-logcat.txt; then
   echo "Recovered Runtime failed to rebuild the active session" >&2
   false
@@ -166,10 +197,14 @@ if grep -q 'FixHUARuntime.*outOfPlanDenied=true capability=9999' dist/runtime-re
   echo "Emulator-only security probe leaked into normal recovery launch" >&2
   false
 fi
+if grep -q 'SECURITY_FAILURE' dist/runtime-recovery-logcat.txt; then
+  echo "Recovered ordinary Activity inherited forbidden bridge authority" >&2
+  false
+fi
 echo "RUNTIME_PROCESS_RECOVERY_PASS oldPid=$runtime_pid_before newPid=$runtime_pid_after"
 endstep
 
-step "Verify foreign-signed sample cannot bind Controller bridge"
+step "Verify foreign-signed installed sample cannot bind Controller bridge"
 adb logcat -c
 adb shell am force-stop com.fixhua.sampletarget || true
 adb shell am start -W -n com.fixhua.sampletarget/.SampleActivity
@@ -178,7 +213,7 @@ adb logcat -d -v brief > dist/sample-logcat.txt
 cat dist/sample-logcat.txt
 grep -q 'FixHUASample.*bridgeDenied=true' dist/sample-logcat.txt
 if grep -q 'SECURITY_FAILURE' dist/sample-logcat.txt; then
-  echo "Foreign sample unexpectedly reached Controller bridge" >&2
+  echo "Foreign installed sample unexpectedly reached Controller bridge" >&2
   false
 fi
 echo "FOREIGN_BRIDGE_DENIAL_PASS"
