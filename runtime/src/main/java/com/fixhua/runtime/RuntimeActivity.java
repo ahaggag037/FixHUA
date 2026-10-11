@@ -48,22 +48,19 @@ public final class RuntimeActivity extends Activity {
                         + "\nController bridge: authenticated"
                         + "\nProtocol: " + protocol);
 
+                if (protocol < SESSION_PROTOCOL_VERSION) {
+                    throw new SecurityException("Controller protocol does not support Runtime sessions");
+                }
+
                 SessionArgs session = SessionArgs.from(getIntent());
-                if (session == null && protocol >= SESSION_PROTOCOL_VERSION) {
-                    session = queryActiveSession(service);
+                if (session == null) session = queryActiveSession(service);
+                if (session == null) {
+                    Log.w(TAG, "sessionRequired=true activeSession=false executionBlocked=true");
+                    status.append("\nNo active Controller-approved session."
+                            + "\nArtifact execution is blocked.");
+                    return;
                 }
-                if (session != null) {
-                    if (protocol < SESSION_PROTOCOL_VERSION) {
-                        throw new SecurityException("Controller protocol does not support Runtime sessions");
-                    }
-                    runSessionArtifactProbe(service, session);
-                } else {
-                    // Temporary compatibility fallback for the pre-session acceptance path. It is
-                    // retained only until CI populates Controller artifact storage before Runtime
-                    // launch; normal Controller-import flow creates an active session.
-                    Log.w(TAG, "legacyArtifactFallback=true");
-                    runLegacyArtifactProbe();
-                }
+                runSessionArtifactProbe(service, session);
             } catch (Exception e) {
                 Log.e(TAG, "bridgeAuthenticated=false", e);
                 status.setText("Runtime UID: " + Process.myUid()
@@ -173,22 +170,6 @@ public final class RuntimeActivity extends Activity {
         } catch (Exception e) {
             Log.e(TAG, "sessionArtifact=false", e);
             status.append("\nSession artifact failed: " + e.getClass().getSimpleName());
-        }
-    }
-
-    private void runLegacyArtifactProbe() {
-        RuntimeApp.assertReady("artifactProbe");
-        try {
-            RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this);
-            Log.i(TAG, "artifactProbe=true code=" + result.codeMarker()
-                    + " resource=" + result.resourceMarker()
-                    + " sha256=" + result.artifactSha256());
-            status.append("\nExternal APK code: " + result.codeMarker());
-            status.append("\nExternal APK resource: " + result.resourceMarker());
-            status.append("\nArtifact SHA-256: " + result.artifactSha256().substring(0, 12) + "…");
-        } catch (Exception e) {
-            Log.e(TAG, "artifactProbe=false", e);
-            status.append("\nArtifact probe unavailable: " + e.getClass().getSimpleName());
         }
     }
 
