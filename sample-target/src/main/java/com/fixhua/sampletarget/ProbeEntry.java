@@ -21,9 +21,12 @@ public final class ProbeEntry {
         }
         String bridgePermission = context.checkSelfPermission(RUNTIME_BRIDGE_PERMISSION)
                 == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
+        Object connectivityService = context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        String connectivity = connectivityService == null ? "missing" : "host";
         return "package=" + context.getPackageName()
                 + ";gms=" + gms
                 + ";bridgePerm=" + bridgePermission
+                + ";connectivity=" + connectivity
                 + ";context=" + context.getClass().getName();
     }
 
