@@ -26,24 +26,33 @@ public final class SyntheticSlicePlansTest {
     }
 
     @Test
-    public void runtimeSessionPlanIncludesArtifactIdentityThenSyntheticQuery() throws Exception {
+    public void runtimeSessionPlanIncludesArtifactIdentityQueryThenContextIdentity() throws Exception {
         ResolutionPlan first = SyntheticSlicePlans.runtimeSessionPlan();
         ResolutionPlan second = SyntheticSlicePlans.runtimeSessionPlan();
         assertEquals(first.digestSha256(), second.digestSha256());
-        assertEquals(3, first.steps().size());
+        assertEquals(4, first.steps().size());
 
         ResolutionStep artifact = first.steps().get(0);
         ResolutionStep identity = first.steps().get(1);
         ResolutionStep query = first.steps().get(2);
+        ResolutionStep contextIdentity = first.steps().get(3);
+
         assertEquals(SyntheticSlicePlans.CAPABILITY_READ_IMPORTED_ARTIFACT, artifact.capabilityId());
         assertEquals(CoreModels.TruthScope.HOST_DELEGATED, artifact.truthScope());
+
         assertEquals(SyntheticSlicePlans.CAPABILITY_SYNTHETIC_PACKAGE_IDENTITY, identity.capabilityId());
         assertEquals("runtime.synthetic-package-identity", identity.providerId());
         assertEquals(CoreModels.AuthorityPlane.P5_SYNTHETIC, identity.authorityPlane());
         assertEquals(CoreModels.TruthScope.SYNTHETIC_VIEW, identity.truthScope());
+
         assertEquals(SyntheticSlicePlans.CAPABILITY_SYNTHETIC_PACKAGE_QUERY, query.capabilityId());
         assertEquals("runtime.synthetic-package-query", query.providerId());
         assertEquals(CoreModels.AuthorityPlane.P5_SYNTHETIC, query.authorityPlane());
         assertEquals(CoreModels.TruthScope.SYNTHETIC_VIEW, query.truthScope());
+
+        assertEquals(SyntheticSlicePlans.CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY, contextIdentity.capabilityId());
+        assertEquals("runtime.synthetic-context-identity", contextIdentity.providerId());
+        assertEquals(CoreModels.AuthorityPlane.P5_SYNTHETIC, contextIdentity.authorityPlane());
+        assertEquals(CoreModels.TruthScope.SYNTHETIC_VIEW, contextIdentity.truthScope());
     }
 }
