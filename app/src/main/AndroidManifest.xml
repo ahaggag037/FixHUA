@@ -9,6 +9,7 @@
 
     <queries>
         <package android:name="com.fixhua.runtime" />
+        <package android:name="com.fixhua.sampletarget" />
         <package android:name="com.gbox.android" />
         <package android:name="com.google.android.gms" />
         <package android:name="com.android.vending" />
@@ -34,6 +35,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".AcceptanceBootstrapActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
 
         <service
             android:name=".HostCapabilityBrokerService"
