@@ -21,7 +21,7 @@ public final class RuntimeActivity extends Activity {
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     private static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
-    private static final int SESSION_PROTOCOL_VERSION = 2;
+    private static final int SESSION_PROTOCOL_VERSION = 3;
     private static final AtomicInteger CREATE_COUNT = new AtomicInteger();
 
     public static final String EXTRA_SESSION_ID = "com.fixhua.runtime.extra.SESSION_ID";
@@ -39,27 +39,39 @@ public final class RuntimeActivity extends Activity {
             Parcel reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(BROKER_DESCRIPTOR);
-                boolean handled = service.transact(TRANSACTION_GET_PROTOCOL, data, reply, 0);
-                if (!handled) throw new IllegalStateException("Controller rejected protocol request");
+                if (!service.transact(TRANSACTION_GET_PROTOCOL, data, reply, 0)) {
+                    throw new IllegalStateException("Controller rejected protocol request");
+                }
                 reply.readException();
                 int protocol = reply.readInt();
                 Log.i(TAG, "bridgeAuthenticated=true protocol=" + protocol + " runtimeUid=" + Process.myUid());
                 status.setText("Runtime UID: " + Process.myUid()
-                        + "\nController bridge: authenticated"
-                        + "\nProtocol: " + protocol);
+                        + "\nController bridge: authenticated\nProtocol: " + protocol);
 
                 if (protocol < SESSION_PROTOCOL_VERSION) {
-                    throw new SecurityException("Controller protocol does not support Runtime sessions");
+                    throw new SecurityException("Controller protocol does not support synthetic package view");
                 }
 
                 SessionArgs session = SessionArgs.from(getIntent());
                 if (session == null) session = queryActiveSession(service);
                 if (session == null) {
                     Log.w(TAG, "sessionRequired=true activeSession=false executionBlocked=true");
-                    status.append("\nNo active Controller-approved session."
-                            + "\nArtifact execution is blocked.");
+                    status.append("\nNo active Controller-approved session.\nArtifact execution is blocked.");
                     return;
                 }
+
+                SyntheticPackageIdentityShim.Identity identity = SyntheticPackageIdentityShim.query(
+                        service, session.sessionId(), session.artifactSha256(), session.planDigest());
+                Log.i(TAG, "packageIdentityShim=true package=" + identity.packageName()
+                        + " versionCode=" + identity.versionCode()
+                        + " targetSdk=" + identity.targetSdk()
+                        + " truth=" + identity.truthScope());
+                status.append("\nSynthetic package: " + identity.packageName());
+                status.append("\nSynthetic version: " + identity.versionName()
+                        + " (" + identity.versionCode() + ")");
+                status.append("\nSynthetic targetSdk: " + identity.targetSdk());
+                status.append("\nTruth scope: " + identity.truthScope());
+
                 runSessionArtifactProbe(service, session);
             } catch (Exception e) {
                 Log.e(TAG, "bridgeAuthenticated=false", e);
@@ -124,14 +136,13 @@ public final class RuntimeActivity extends Activity {
         Parcel reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(BROKER_DESCRIPTOR);
-            boolean handled = broker.transact(TRANSACTION_GET_ACTIVE_SESSION, data, reply, 0);
-            if (!handled) throw new SecurityException("Controller did not handle active-session query");
+            if (!broker.transact(TRANSACTION_GET_ACTIVE_SESSION, data, reply, 0)) {
+                throw new SecurityException("Controller did not handle active-session query");
+            }
             reply.readException();
             if (reply.readInt() == 0) return null;
             SessionArgs session = new SessionArgs(
-                    reply.readString(),
-                    reply.readString(),
-                    reply.readString());
+                    reply.readString(), reply.readString(), reply.readString());
             String packageName = reply.readString();
             String recipeId = reply.readString();
             int recipeVersion = reply.readInt();
@@ -149,11 +160,7 @@ public final class RuntimeActivity extends Activity {
         RuntimeApp.assertReady("sessionArtifactProbe");
         try {
             File image = RuntimeSessionArtifact.obtain(
-                    this,
-                    broker,
-                    session.sessionId(),
-                    session.artifactSha256(),
-                    session.planDigest());
+                    this, broker, session.sessionId(), session.artifactSha256(), session.planDigest());
             RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this, image);
             if (!session.artifactSha256().equalsIgnoreCase(result.artifactSha256())) {
                 throw new SecurityException("Loaded artifact differs from active session");
@@ -177,10 +184,7 @@ public final class RuntimeActivity extends Activity {
     protected void onDestroy() {
         RuntimeApp.assertReady("activityOnDestroy");
         if (bound) {
-            try {
-                unbindService(connection);
-            } catch (IllegalArgumentException ignored) {
-            }
+            try { unbindService(connection); } catch (IllegalArgumentException ignored) {}
             bound = false;
         }
         super.onDestroy();
