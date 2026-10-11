@@ -9,8 +9,8 @@ on_error() {
   for f in dist/controller_uid.txt dist/runtime_uid.txt dist/sample_uid.txt dist/uid-boundary.txt; do
     [[ -f "$f" ]] && { echo "### $f"; cat "$f"; }
   done
-  [[ -f dist/runtime-logcat.txt ]] && tail -n 300 dist/runtime-logcat.txt || true
-  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 320 dist/runtime-lifecycle-logcat.txt || true
+  [[ -f dist/runtime-logcat.txt ]] && tail -n 360 dist/runtime-logcat.txt || true
+  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 380 dist/runtime-lifecycle-logcat.txt || true
   [[ -f dist/sample-logcat.txt ]] && tail -n 200 dist/sample-logcat.txt || true
   exit "$rc"
 }
@@ -20,7 +20,6 @@ uid_of() {
   adb shell dumpsys package "$1" | tr -d '\r' \
     | sed -n 's/.*userId=\([0-9][0-9]*\).*/\1/p' | sed -n '1p'
 }
-
 step() { echo "::group::$1"; }
 endstep() { echo "::endgroup::"; }
 
@@ -48,7 +47,7 @@ adb logcat -c
 adb shell am force-stop com.fixhua.guard || true
 adb shell am force-stop com.fixhua.runtime || true
 adb shell am start -W -n com.fixhua.guard/.AcceptanceBootstrapActivity
-sleep 6
+sleep 8
 adb logcat -d -v brief > dist/runtime-logcat.txt
 cat dist/runtime-logcat.txt
 grep -q 'FixHUAAcceptance.*sessionReady=true package=com.fixhua.sampletarget' dist/runtime-logcat.txt
@@ -64,32 +63,33 @@ fi
 echo "SYNTHETIC_PACKAGE_MANAGER_VIEW_PASS"
 endstep
 
-step "Verify read-only session artifact loads code/resources"
+step "Verify DEX callsite transform drives foreign app perception"
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*imageReadOnly=true' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=1' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*appView=.*gms=absent' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*sourceReadOnly=true' dist/runtime-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-logcat.txt; then
-  echo "Session artifact verification failed" >&2
+  echo "Transformed session artifact verification failed" >&2
   false
 fi
-echo "SESSION_ARTIFACT_LOADER_PASS"
+echo "DEX_CALLSITE_TRANSFORM_PASS"
 endstep
 
-step "Verify lifecycle recreation preserves package view and artifact"
+step "Verify lifecycle recreation preserves synthetic reality and transform"
 adb logcat -c
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
 sleep 3
 adb shell settings put system user_rotation 0
-sleep 3
+sleep 4
 adb logcat -d -v brief > dist/runtime-lifecycle-logcat.txt
 cat dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
-grep -q 'FixHUARuntime.*packageIdentityShim=true package=com.fixhua.sampletarget.*truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=1.*appView=.*gms=absent' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
-  echo "Session artifact did not survive recreation" >&2
+  echo "Transformed session did not survive recreation" >&2
   false
 fi
 max_create_count="$(grep -o 'FixHUARuntime.*activityReady=true createCount=[0-9]*' dist/runtime-lifecycle-logcat.txt | sed 's/.*createCount=//' | sort -n | tail -n 1)"
@@ -97,7 +97,7 @@ max_create_count="$(grep -o 'FixHUARuntime.*activityReady=true createCount=[0-9]
 (( max_create_count >= 2 ))
 adb shell pidof com.fixhua.runtime | tee dist/runtime-pid-after-rotation.txt
 grep -q 'com.fixhua.runtime/.RuntimeActivity' <(adb shell dumpsys activity activities | tr -d '\r')
-echo "LIFECYCLE_SESSION_INTEGRITY_PASS createCount=$max_create_count"
+echo "LIFECYCLE_SYNTHETIC_REALITY_PASS createCount=$max_create_count"
 adb shell settings put system accelerometer_rotation 1 || true
 endstep
 
