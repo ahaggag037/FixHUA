@@ -17,6 +17,7 @@ public final class HostCapabilityBrokerService extends Service {
     static final int PROTOCOL_VERSION = 2;
     static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     static final int TRANSACTION_OPEN_SESSION_ARTIFACT = IBinder.FIRST_CALL_TRANSACTION + 1;
+    static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
     private static final String EXPECTED_RUNTIME_PACKAGE = "com.fixhua.runtime";
 
     private final Binder bridge = new Binder() {
@@ -32,16 +33,45 @@ public final class HostCapabilityBrokerService extends Service {
 
             if (code == TRANSACTION_GET_PROTOCOL) {
                 data.enforceInterface(DESCRIPTOR);
+                enforceNoTrailingData(data);
                 reply.writeNoException();
                 reply.writeInt(PROTOCOL_VERSION);
                 return true;
             }
 
+            if (code == TRANSACTION_GET_ACTIVE_SESSION) {
+                data.enforceInterface(DESCRIPTOR);
+                enforceNoTrailingData(data);
+                try {
+                    RuntimeSessionStore.Session session = new RuntimeSessionStore(
+                            HostCapabilityBrokerService.this).active();
+                    reply.writeNoException();
+                    if (session == null) {
+                        reply.writeInt(0);
+                    } else {
+                        reply.writeInt(1);
+                        reply.writeString(session.sessionId());
+                        reply.writeString(session.artifactSha256());
+                        reply.writeString(session.planDigest());
+                        reply.writeString(session.packageName());
+                        reply.writeString(session.recipeId());
+                        reply.writeInt(session.recipeVersion());
+                    }
+                    return true;
+                } catch (SecurityException failure) {
+                    throw failure;
+                } catch (Exception failure) {
+                    RemoteException remote = new RemoteException("Active Runtime session unavailable");
+                    remote.initCause(failure);
+                    throw remote;
+                }
+            }
+
             if (code == TRANSACTION_OPEN_SESSION_ARTIFACT) {
                 data.enforceInterface(DESCRIPTOR);
-                String sessionId = bounded(data.readString(), 128, "sessionId");
-                String artifactSha256 = bounded(data.readString(), 64, "artifactSha256");
-                String planDigest = bounded(data.readString(), 64, "planDigest");
+                String sessionId = bounded(data.readString(), 128, false, "sessionId");
+                String artifactSha256 = bounded(data.readString(), 64, true, "artifactSha256");
+                String planDigest = bounded(data.readString(), 64, true, "planDigest");
                 enforceNoTrailingData(data);
 
                 try {
@@ -97,12 +127,9 @@ public final class HostCapabilityBrokerService extends Service {
         }
     }
 
-    private static String bounded(String value, int exactOrMax, String field) {
-        if (value == null || value.isBlank() || value.length() > exactOrMax) {
-            throw new SecurityException("Malformed " + field);
-        }
-        if (("artifactSha256".equals(field) || "planDigest".equals(field))
-                && value.length() != exactOrMax) {
+    private static String bounded(String value, int exactOrMax, boolean exact, String field) {
+        if (value == null || value.isBlank() || value.length() > exactOrMax
+                || (exact && value.length() != exactOrMax)) {
             throw new SecurityException("Malformed " + field);
         }
         return value;
