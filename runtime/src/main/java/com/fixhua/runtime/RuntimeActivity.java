@@ -218,9 +218,10 @@ public final class RuntimeActivity extends Activity {
                 throw new SecurityException("Loaded source artifact differs from active session");
             }
             String expectedPrefix = "package=" + syntheticPackageName
-                    + ";gms=absent;bridgePerm=denied;";
+                    + ";gms=absent;bridgePerm=denied;connectivity=host;";
             if (!result.appViewMarker().startsWith(expectedPrefix)) {
-                throw new SecurityException("Transformed app did not consume synthetic context/package/permission view");
+                throw new SecurityException(
+                        "Transformed app did not consume synthetic/safe-stub/host-delegated view");
             }
             Log.i(TAG, "sessionArtifact=true code=" + result.codeMarker()
                     + " resource=" + result.resourceMarker()
@@ -230,11 +231,13 @@ public final class RuntimeActivity extends Activity {
                     + " pmCallsites=" + result.packageManagerCallsites()
                     + " contextCallsites=" + result.contextIdentityCallsites()
                     + " safeStubCallsites=" + result.safeStubCallsites()
+                    + " hostRedirectCallsites=" + result.hostRedirectCallsites()
                     + " appView=" + result.appViewMarker()
                     + " sourceReadOnly=" + !sourceImage.canWrite());
             status.append("\nSession source: verified");
             status.append("\nDEX callsite transform: " + result.rewrittenCallsites());
             status.append("\nPermission SAFE_STUB callsites: " + result.safeStubCallsites());
+            status.append("\nHost service redirects: " + result.hostRedirectCallsites());
             status.append("\nSynthetic Context package: " + syntheticPackageName);
             status.append("\nForeign app view: " + result.appViewMarker());
             status.append("\nExternal APK code: " + result.codeMarker());
