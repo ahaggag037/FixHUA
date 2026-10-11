@@ -26,24 +26,31 @@ public final class SyntheticSlicePlansTest {
     }
 
     @Test
-    public void runtimeSessionPlanIncludesHostFactSyntheticRealityAndSafeStub() throws Exception {
+    public void runtimeSessionPlanIncludesHostFactsSyntheticRealitySafeStubAndHostRedirect()
+            throws Exception {
         ResolutionPlan first = SyntheticSlicePlans.runtimeSessionPlan();
         ResolutionPlan second = SyntheticSlicePlans.runtimeSessionPlan();
         assertEquals(first.digestSha256(), second.digestSha256());
-        assertEquals(7, first.steps().size());
+        assertEquals(8, first.steps().size());
 
         ResolutionStep hostFact = first.steps().get(0);
-        ResolutionStep artifact = first.steps().get(1);
-        ResolutionStep identity = first.steps().get(2);
-        ResolutionStep query = first.steps().get(3);
-        ResolutionStep contextIdentity = first.steps().get(4);
-        ResolutionStep safeStub = first.steps().get(5);
-        ResolutionStep slice = first.steps().get(6);
+        ResolutionStep connectivity = first.steps().get(1);
+        ResolutionStep artifact = first.steps().get(2);
+        ResolutionStep identity = first.steps().get(3);
+        ResolutionStep query = first.steps().get(4);
+        ResolutionStep contextIdentity = first.steps().get(5);
+        ResolutionStep safeStub = first.steps().get(6);
+        ResolutionStep slice = first.steps().get(7);
 
         assertEquals(SyntheticSlicePlans.CAPABILITY_HOST_GBOX_PACKAGE_FACT, hostFact.capabilityId());
         assertEquals("controller.host-gbox-package-fact", hostFact.providerId());
         assertEquals(CoreModels.AuthorityPlane.P0_PUBLIC, hostFact.authorityPlane());
         assertEquals(CoreModels.TruthScope.HOST_REAL, hostFact.truthScope());
+
+        assertEquals(SyntheticSlicePlans.CAPABILITY_HOST_CONNECTIVITY_SERVICE, connectivity.capabilityId());
+        assertEquals("runtime.host-connectivity-service-v1", connectivity.providerId());
+        assertEquals(CoreModels.AuthorityPlane.P0_PUBLIC, connectivity.authorityPlane());
+        assertEquals(CoreModels.TruthScope.HOST_DELEGATED, connectivity.truthScope());
 
         assertEquals(SyntheticSlicePlans.CAPABILITY_READ_IMPORTED_ARTIFACT, artifact.capabilityId());
         assertEquals("controller.readonly-artifact-fd", artifact.providerId());
