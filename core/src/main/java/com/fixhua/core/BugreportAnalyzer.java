@@ -141,8 +141,8 @@ public final class BugreportAnalyzer {
                 current = trailingInt(trimmed, current);
             }
 
-            if (trimmed.contains("always_finish_activities=1")) alwaysFinish = true;
-            if (trimmed.contains("debug.egl.force_msaa=true")) force4xMsaa = true;
+            if (containsEnabledValue(trimmed, "always_finish_activities")) alwaysFinish = true;
+            if (containsEnabledValue(trimmed, "debug.egl.force_msaa")) force4xMsaa = true;
             if (trimmed.contains("Multiprocess enabled: true")) webViewMultiprocess = true;
             if (trimmed.contains("WebView package dirty: true")) webViewDirty = true;
 
@@ -186,6 +186,17 @@ public final class BugreportAnalyzer {
                 webViewVersion,
                 scannedBytes,
                 sourceEntry);
+    }
+
+    private static boolean containsEnabledValue(String line, String key) {
+        if (!line.contains(key)) return false;
+        String lower = line.toLowerCase();
+        return lower.contains("=1")
+                || lower.contains("=true")
+                || lower.contains(": 1")
+                || lower.contains(": true")
+                || lower.contains("]: [1]")
+                || lower.contains("]: [true]");
     }
 
     private static int trailingInt(String line, int fallback) {
