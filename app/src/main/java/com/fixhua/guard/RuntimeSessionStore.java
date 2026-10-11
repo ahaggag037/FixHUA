@@ -28,6 +28,12 @@ final class RuntimeSessionStore {
             String sessionId,
             String artifactSha256,
             String packageName,
+            String versionName,
+            long versionCode,
+            int minSdk,
+            int targetSdk,
+            String applicationClassName,
+            String primarySigningSha256,
             String recipeId,
             int recipeVersion,
             String planDigest,
@@ -44,13 +50,22 @@ final class RuntimeSessionStore {
         if (record == null) throw new IllegalArgumentException("record");
         File artifact = artifactFile(record.artifactSha256());
         verifyArtifact(artifact, record.artifactSha256());
+        if (record.signingCertificateSha256().isEmpty()) {
+            throw new SecurityException("Synthetic package identity requires signing evidence");
+        }
 
-        CoreModels.ResolutionPlan plan = SyntheticSlicePlans.artifactReadPlan();
+        CoreModels.ResolutionPlan plan = SyntheticSlicePlans.runtimeSessionPlan();
         long now = System.currentTimeMillis();
         Session session = new Session(
                 UUID.randomUUID().toString(),
                 record.artifactSha256(),
                 record.packageName(),
+                record.versionName(),
+                record.versionCode(),
+                record.minSdk(),
+                record.targetSdk(),
+                record.applicationClassName(),
+                normalizeSha256(record.signingCertificateSha256().get(0)),
                 SyntheticSlicePlans.RECIPE_ID,
                 SyntheticSlicePlans.RECIPE_VERSION,
                 plan.digestSha256(),
@@ -67,7 +82,7 @@ final class RuntimeSessionStore {
             revoke();
             return null;
         }
-        CoreModels.ResolutionPlan expectedPlan = SyntheticSlicePlans.artifactReadPlan();
+        CoreModels.ResolutionPlan expectedPlan = SyntheticSlicePlans.runtimeSessionPlan();
         if (!constantEquals(expectedPlan.digestSha256(), session.planDigest())) {
             throw new SecurityException("Runtime session plan is no longer valid");
         }
@@ -115,10 +130,16 @@ final class RuntimeSessionStore {
 
     private void persist(Session session) throws Exception {
         JSONObject json = new JSONObject();
-        json.put("schemaVersion", 1);
+        json.put("schemaVersion", 2);
         json.put("sessionId", session.sessionId());
         json.put("artifactSha256", session.artifactSha256());
         json.put("packageName", session.packageName());
+        json.put("versionName", session.versionName());
+        json.put("versionCode", session.versionCode());
+        json.put("minSdk", session.minSdk());
+        json.put("targetSdk", session.targetSdk());
+        json.put("applicationClassName", session.applicationClassName());
+        json.put("primarySigningSha256", session.primarySigningSha256());
         json.put("recipeId", session.recipeId());
         json.put("recipeVersion", session.recipeVersion());
         json.put("planDigest", session.planDigest());
@@ -152,11 +173,17 @@ final class RuntimeSessionStore {
         }
         if (offset != bytes.length) throw new IOException("Incomplete Runtime session state");
         JSONObject json = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-        if (json.getInt("schemaVersion") != 1) throw new SecurityException("Unknown Runtime session schema");
+        if (json.getInt("schemaVersion") != 2) throw new SecurityException("Unknown Runtime session schema");
         return new Session(
                 json.getString("sessionId"),
                 normalizeSha256(json.getString("artifactSha256")),
                 json.getString("packageName"),
+                json.optString("versionName", ""),
+                json.getLong("versionCode"),
+                json.getInt("minSdk"),
+                json.getInt("targetSdk"),
+                json.optString("applicationClassName", ""),
+                normalizeSha256(json.getString("primarySigningSha256")),
                 json.getString("recipeId"),
                 json.getInt("recipeVersion"),
                 normalizeSha256(json.getString("planDigest")),
