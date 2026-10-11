@@ -36,6 +36,7 @@ public final class RuntimeActivity extends Activity {
     private boolean bound;
     private boolean resumed;
     private ForeignScreenSession foreignScreen;
+    private ForeignActivitySession foreignActivity;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -167,6 +168,7 @@ public final class RuntimeActivity extends Activity {
         RuntimeApp.assertReady("activityOnResume");
         resumed = true;
         dispatchForeignResume();
+        dispatchOrdinaryActivityResume();
     }
 
     @Override
@@ -244,8 +246,12 @@ public final class RuntimeActivity extends Activity {
             if (!result.screenCreateMarker().startsWith("create=1;resume=0;config=0;destroy=0")) {
                 throw new SecurityException("Imported screen did not receive delegated onCreate");
             }
+            if (result.activityFacadeClasses() != 1) {
+                throw new SecurityException("Ordinary Activity facade transform was not unique");
+            }
 
             replaceForeignScreen(result.screenSession(), result.screenCreateMarker());
+            replaceOrdinaryActivity(result.ordinaryActivitySession());
 
             Log.i(TAG, "sessionArtifact=true code=" + result.codeMarker()
                     + " resource=" + result.resourceMarker()
@@ -256,13 +262,15 @@ public final class RuntimeActivity extends Activity {
                     + " contextCallsites=" + result.contextIdentityCallsites()
                     + " safeStubCallsites=" + result.safeStubCallsites()
                     + " hostRedirectCallsites=" + result.hostRedirectCallsites()
+                    + " activityFacadeClasses=" + result.activityFacadeClasses()
                     + " appView=" + result.appViewMarker()
                     + " sourceReadOnly=" + !sourceImage.canWrite());
             status.append("\nSession source: verified");
             status.append("\nDEX callsite transform: " + result.rewrittenCallsites());
             status.append("\nPermission SAFE_STUB callsites: " + result.safeStubCallsites());
             status.append("\nHost service redirects: " + result.hostRedirectCallsites());
-            status.append("\nProxy lifecycle: imported onCreate delegated");
+            status.append("\nActivity facades: " + result.activityFacadeClasses());
+            status.append("\nProxy lifecycle: ordinary Activity + delegate active");
             status.append("\nSynthetic Context package: " + syntheticPackageName);
             status.append("\nForeign app view: " + result.appViewMarker());
             status.append("\nExternal APK code: " + result.codeMarker());
@@ -285,6 +293,16 @@ public final class RuntimeActivity extends Activity {
         if (resumed) dispatchForeignResume();
     }
 
+    private void replaceOrdinaryActivity(ForeignActivitySession next) throws Exception {
+        if (foreignActivity != null) {
+            foreignActivity.onDestroy();
+            Log.i(TAG, "ordinaryActivityLifecycle=true phase=replaceDestroy");
+        }
+        foreignActivity = next;
+        Log.i(TAG, "ordinaryActivityLifecycle=true phase=onCreate facade=true");
+        if (resumed) dispatchOrdinaryActivityResume();
+    }
+
     private void dispatchForeignResume() {
         if (foreignScreen == null) return;
         try {
@@ -295,9 +313,29 @@ public final class RuntimeActivity extends Activity {
         }
     }
 
+    private void dispatchOrdinaryActivityResume() {
+        if (foreignActivity == null) return;
+        try {
+            foreignActivity.onResume();
+            Log.i(TAG, "ordinaryActivityLifecycle=true phase=onResume facade=true");
+        } catch (Exception failure) {
+            Log.e(TAG, "ordinaryActivityLifecycle=false phase=onResume", failure);
+        }
+    }
+
     @Override
     protected void onDestroy() {
         RuntimeApp.assertReady("activityOnDestroy");
+        if (foreignActivity != null) {
+            try {
+                foreignActivity.onDestroy();
+                Log.i(TAG, "ordinaryActivityLifecycle=true phase=onDestroy facade=true");
+            } catch (Exception failure) {
+                Log.e(TAG, "ordinaryActivityLifecycle=false phase=onDestroy", failure);
+            } finally {
+                foreignActivity = null;
+            }
+        }
         if (foreignScreen != null) {
             try {
                 String marker = foreignScreen.onDestroy();
