@@ -14,12 +14,14 @@ import java.io.File;
 
 public final class HostCapabilityBrokerService extends Service {
     static final String DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
-    static final int PROTOCOL_VERSION = 3;
+    static final int PROTOCOL_VERSION = 4;
     static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     static final int TRANSACTION_OPEN_SESSION_ARTIFACT = IBinder.FIRST_CALL_TRANSACTION + 1;
     static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
     static final int TRANSACTION_GET_SYNTHETIC_PACKAGE_IDENTITY = IBinder.FIRST_CALL_TRANSACTION + 3;
+    static final int TRANSACTION_QUERY_SYNTHETIC_PACKAGE = IBinder.FIRST_CALL_TRANSACTION + 4;
     private static final String EXPECTED_RUNTIME_PACKAGE = "com.fixhua.runtime";
+    private static final String SYNTHETIC_TRUTH_SCOPE = "SYNTHETIC_VIEW";
 
     private final Binder bridge = new Binder() {
         @Override
@@ -93,19 +95,39 @@ public final class HostCapabilityBrokerService extends Service {
                             HostCapabilityBrokerService.this).requireActive(
                                     request.sessionId(), request.artifactSha256(), request.planDigest());
                     reply.writeNoException();
-                    reply.writeString(session.packageName());
-                    reply.writeString(session.versionName());
-                    reply.writeLong(session.versionCode());
-                    reply.writeInt(session.minSdk());
-                    reply.writeInt(session.targetSdk());
-                    reply.writeString(session.applicationClassName());
-                    reply.writeString(session.primarySigningSha256());
-                    reply.writeString("SYNTHETIC_VIEW");
+                    writePackageProjection(reply, session);
                     return true;
                 } catch (SecurityException failure) {
                     throw failure;
                 } catch (Exception failure) {
                     RemoteException remote = new RemoteException("Synthetic package identity unavailable");
+                    remote.initCause(failure);
+                    throw remote;
+                }
+            }
+
+            if (code == TRANSACTION_QUERY_SYNTHETIC_PACKAGE) {
+                data.enforceInterface(DESCRIPTOR);
+                SessionRequest request = readSessionRequestPrefix(data);
+                String queryPackage = packageName(data.readString(), "queryPackage");
+                enforceNoTrailingData(data);
+                try {
+                    RuntimeSessionStore.Session session = new RuntimeSessionStore(
+                            HostCapabilityBrokerService.this).requireActive(
+                                    request.sessionId(), request.artifactSha256(), request.planDigest());
+                    reply.writeNoException();
+                    reply.writeString(SYNTHETIC_TRUTH_SCOPE);
+                    if (session.packageName().equals(queryPackage)) {
+                        reply.writeInt(1);
+                        writePackageProjection(reply, session);
+                    } else {
+                        reply.writeInt(0);
+                    }
+                    return true;
+                } catch (SecurityException failure) {
+                    throw failure;
+                } catch (Exception failure) {
+                    RemoteException remote = new RemoteException("Synthetic package query unavailable");
                     remote.initCause(failure);
                     throw remote;
                 }
@@ -129,11 +151,27 @@ public final class HostCapabilityBrokerService extends Service {
         reply.writeInt(session.recipeVersion());
     }
 
+    private static void writePackageProjection(Parcel reply, RuntimeSessionStore.Session session) {
+        reply.writeString(session.packageName());
+        reply.writeString(session.versionName());
+        reply.writeLong(session.versionCode());
+        reply.writeInt(session.minSdk());
+        reply.writeInt(session.targetSdk());
+        reply.writeString(session.applicationClassName());
+        reply.writeString(session.primarySigningSha256());
+        reply.writeString(SYNTHETIC_TRUTH_SCOPE);
+    }
+
     private static SessionRequest readSessionRequest(Parcel data) {
+        SessionRequest request = readSessionRequestPrefix(data);
+        enforceNoTrailingData(data);
+        return request;
+    }
+
+    private static SessionRequest readSessionRequestPrefix(Parcel data) {
         String sessionId = bounded(data.readString(), 128, false, "sessionId");
         String artifactSha256 = bounded(data.readString(), 64, true, "artifactSha256");
         String planDigest = bounded(data.readString(), 64, true, "planDigest");
-        enforceNoTrailingData(data);
         return new SessionRequest(sessionId, artifactSha256, planDigest);
     }
 
@@ -163,6 +201,22 @@ public final class HostCapabilityBrokerService extends Service {
             throw new SecurityException("Malformed " + field);
         }
         return value;
+    }
+
+    private static String packageName(String value, String field) {
+        String normalized = bounded(value, 255, false, field);
+        if (normalized.startsWith(".") || normalized.endsWith(".") || normalized.contains("..")) {
+            throw new SecurityException("Malformed " + field);
+        }
+        for (int i = 0; i < normalized.length(); i++) {
+            char c = normalized.charAt(i);
+            boolean allowed = (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9')
+                    || c == '_' || c == '.';
+            if (!allowed) throw new SecurityException("Malformed " + field);
+        }
+        return normalized;
     }
 
     private static void enforceNoTrailingData(Parcel data) {
