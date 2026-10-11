@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixhua.local/schema/compat-recipe-v0.1.schema.json",
+  "title": "FixHUA Compatibility Recipe v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "recipeId", "target", "requirements"],
+  "properties": {
+    "schemaVersion": {"const": "0.1"},
+    "recipeId": {"type": "string", "pattern": "^[a-z0-9._-]+$"},
+    "recipeVersion": {"type": "integer", "minimum": 1},
+    "description": {"type": "string"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packageName"],
+      "properties": {
+        "packageName": {"type": "string", "minLength": 3},
+        "minVersionCode": {"type": "integer", "minimum": 0},
+        "maxVersionCode": {"type": "integer", "minimum": 0},
+        "androidMinSdk": {"type": "integer", "minimum": 1},
+        "androidMaxSdk": {"type": "integer", "minimum": 1},
+        "manufacturer": {"type": "string"},
+        "modelPattern": {"type": "string"},
+        "emuiPattern": {"type": "string"}
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/requirement"}
+    },
+    "shims": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/shim"}
+    },
+    "providerPreferences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capabilityId", "providers"],
+        "properties": {
+          "capabilityId": {"type": "integer", "minimum": 1},
+          "providers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "excludedProviders": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        }
+      }
+    },
+    "fallbacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["on", "provider"],
+        "properties": {
+          "on": {"type": "array", "items": {"enum": ["DENIED", "UNSUPPORTED", "ERROR", "PARTIAL"]}, "minItems": 1, "uniqueItems": true},
+          "provider": {"type": "string"},
+          "maxTruthScope": {"$ref": "#/$defs/truthScope"}
+        }
+      }
+    },
+    "integrityBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowAttestationBypass": {"const": false},
+        "onTrustedHostRequirement": {"enum": ["UNSUPPORTED", "HOST_NATIVE_FALLBACK", "EXTERNAL_RUNTIME_FALLBACK"]}
+      }
+    }
+  },
+  "$defs": {
+    "truthScope": {
+      "enum": ["HOST_REAL", "HOST_DELEGATED", "SYNTHETIC_VIEW", "GUEST_REAL"]
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capabilityId", "allowedTruthScopes"],
+      "properties": {
+        "capabilityId": {"type": "integer", "minimum": 1},
+        "required": {"type": "boolean", "default": true},
+        "allowedTruthScopes": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/truthScope"},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "minimumSemantics": {"enum": ["EXACT", "EQUIVALENT", "DEGRADED", "FALLBACK_ONLY"]},
+        "requiresVirtualCallerIdentity": {"type": "boolean", "default": false}
+      }
+    },
+    "shim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shimId", "type", "capabilityId"],
+      "properties": {
+        "shimId": {"type": "string", "pattern": "^[a-z0-9._-]+$"},
+        "type": {
+          "enum": [
+            "PASS_THROUGH",
+            "SYNTHETIC_VALUE",
+            "SAFE_STUB",
+            "REDIRECT_SERVICE",
+            "FILTER_FLAGS",
+            "SHAPE_RESULT",
+            "DISABLE_SUBFEATURE",
+            "VIRTUAL_IDENTITY",
+            "HOST_DELEGATE",
+            "UNSUPPORTED_INTEGRITY_BOUNDARY"
+          ]
+        },
+        "capabilityId": {"type": "integer", "minimum": 1},
+        "runtimeGroup": {"type": "string"},
+        "provider": {"type": "string"},
+        "config": {"type": "object"},
+        "safeStubSemantics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expectedCallerBehavior", "neutralResult", "sideEffects"],
+          "properties": {
+            "expectedCallerBehavior": {"type": "string", "minLength": 1},
+            "neutralResult": {},
+            "sideEffects": {"type": "string", "minLength": 1},
+            "evidenceReference": {"type": "string"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "SAFE_STUB"}}, "required": ["type"]},
+          "then": {"required": ["safeStubSemantics"]}
+        }
+      ]
+    }
+  }
+}
