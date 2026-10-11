@@ -5,35 +5,55 @@ import android.content.res.Resources;
 import android.content.res.loader.ResourcesLoader;
 import android.content.res.loader.ResourcesProvider;
 import android.os.Build;
+import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 
 import dalvik.system.DexClassLoader;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.security.MessageDigest;
 
 final class RuntimeArtifactProbe {
     private static final String SAMPLE_ENTRY = "com.fixhua.sampletarget.ProbeEntry";
     private static final String SAMPLE_R_STRING = "com.fixhua.sampletarget.R$string";
 
-    record Result(String artifactSha256, String codeMarker, String resourceMarker) {}
+    record Result(
+            String sourceSha256,
+            String transformedSha256,
+            int rewrittenCallsites,
+            String codeMarker,
+            String appViewMarker,
+            String resourceMarker) {}
 
-    static Result run(Context context, File apk) throws Exception {
+    static Result run(
+            Context context,
+            File sourceApk,
+            IBinder broker,
+            String sessionId,
+            String artifactSha256,
+            String planDigest) throws Exception {
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
         }
-        if (apk == null || !apk.isFile()) {
+        if (sourceApk == null || !sourceApk.isFile()) {
             throw new IllegalStateException("Runtime artifact is missing");
         }
-        if (apk.canWrite()) {
-            throw new SecurityException("Runtime artifact must be read-only before code loading");
+        if (sourceApk.canWrite()) {
+            throw new SecurityException("Runtime artifact must be read-only before transformation");
         }
 
-        String hash = sha256(apk);
-        File optimized = new File(context.getCodeCacheDir(), "sample-target-loader-" + hash.substring(0, 12));
+        DexCallsiteTransformer.Result transformed = DexCallsiteTransformer.transform(context, sourceApk);
+        if (!artifactSha256.equalsIgnoreCase(transformed.sourceSha256())) {
+            throw new SecurityException("Transform source differs from Controller-approved artifact");
+        }
+        if (transformed.rewrittenCallsites() != 1) {
+            throw new SecurityException("Slice V1 requires exactly one transformed callsite");
+        }
+
+        File apk = transformed.image();
+        File optimized = new File(
+                context.getCodeCacheDir(), "sample-target-loader-" + transformed.imageSha256().substring(0, 12));
         if (!optimized.exists() && !optimized.mkdirs()) {
             throw new IllegalStateException("Cannot create runtime code cache");
         }
@@ -47,6 +67,14 @@ final class RuntimeArtifactProbe {
         Class<?> entry = classLoader.loadClass(SAMPLE_ENTRY);
         Method pureMarker = entry.getMethod("pureMarker");
         String codeMarker = (String) pureMarker.invoke(null);
+
+        Method run = entry.getMethod("run", Context.class);
+        String appViewMarker;
+        try (PackageManagerHooks.Scope ignored = PackageManagerHooks.install(
+                packageName -> SyntheticPackageManagerView.query(
+                        broker, sessionId, artifactSha256, planDigest, packageName))) {
+            appViewMarker = (String) run.invoke(null, context);
+        }
 
         Class<?> rString = classLoader.loadClass(SAMPLE_R_STRING);
         Field markerField = rString.getField("synthetic_marker");
@@ -71,19 +99,13 @@ final class RuntimeArtifactProbe {
             provider.close();
         }
 
-        return new Result(hash, codeMarker, resourceMarker);
-    }
-
-    static String sha256(File file) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        byte[] buffer = new byte[64 * 1024];
-        try (FileInputStream input = new FileInputStream(file)) {
-            int read;
-            while ((read = input.read(buffer)) != -1) md.update(buffer, 0, read);
-        }
-        StringBuilder hex = new StringBuilder(64);
-        for (byte b : md.digest()) hex.append(String.format("%02x", b));
-        return hex.toString();
+        return new Result(
+                transformed.sourceSha256(),
+                transformed.imageSha256(),
+                transformed.rewrittenCallsites(),
+                codeMarker,
+                appViewMarker,
+                resourceMarker);
     }
 
     private RuntimeArtifactProbe() {}
