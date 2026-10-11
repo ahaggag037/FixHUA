@@ -2,6 +2,10 @@ package com.fixhua.runtime;
 
 import android.content.Context;
 
+import com.fixhua.core.CoreModels;
+import com.fixhua.core.ExecutionEvidence;
+import com.fixhua.core.SyntheticSlicePlans;
+
 import java.lang.reflect.Method;
 
 /**
@@ -64,23 +68,29 @@ final class ForeignScreenSession {
         if (destroyed) throw new IllegalStateException("Foreign screen already destroyed");
         String marker = invoke(onCreate, context);
         created = true;
+        emitLifecycle("onCreate", marker);
         return marker;
     }
 
     String onResume() throws Exception {
         requireAlive();
-        return invoke(onResume);
+        String marker = invoke(onResume);
+        emitLifecycle("onResume", marker);
+        return marker;
     }
 
     String onConfigurationChanged(int orientation) throws Exception {
         requireAlive();
-        return invoke(onConfigurationChanged, orientation);
+        String marker = invoke(onConfigurationChanged, orientation);
+        emitLifecycle("onConfigurationChanged", marker);
+        return marker;
     }
 
     String onDestroy() throws Exception {
         if (!created || destroyed) return snapshot();
         String marker = invoke(onDestroy);
         destroyed = true;
+        emitLifecycle("onDestroy", marker);
         return marker;
     }
 
@@ -96,6 +106,16 @@ final class ForeignScreenSession {
                 syntheticPackageName, packageQuery)) {
             return (String) method.invoke(target, args);
         }
+    }
+
+    private void emitLifecycle(String phase, String marker) {
+        ExecutionEvidenceEmitter.emit(
+                SyntheticSlicePlans.CAPABILITY_SYNTHETIC_SLICE_V1,
+                "runtime.proxy-lifecycle-v1",
+                ExecutionEvidence.Decision.SHIM,
+                CoreModels.TruthScope.SYNTHETIC_VIEW,
+                "proxy-lifecycle:" + phase,
+                marker);
     }
 
     private void requireAlive() {
