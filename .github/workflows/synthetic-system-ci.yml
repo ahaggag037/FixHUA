@@ -2,7 +2,7 @@ name: FixHUA Synthetic System CI
 
 on:
   push:
-    branches: [ 'research/synthetic-system-v1' ]
+    branches: [ 'research/synthetic-system-v1', 'build/synthetic-slice-v1' ]
   pull_request:
     branches: [ main ]
     paths:
@@ -44,6 +44,15 @@ jobs:
         run: |
           gradle --stacktrace :core:test
           gradle --stacktrace :app:testReleaseUnitTest
+
+      - name: Audit Runtime process-control boundary
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'Process\.killProcess\(|System\.exit\(|Runtime\.getRuntime\(\)\.exec\(' runtime/src/main/java; then
+            echo "Runtime contains an opaque/direct process termination or command execution primitive"
+            exit 1
+          fi
+          echo "RUNTIME_PROCESS_CONTROL_AUDIT_PASS"
 
       - name: Lint all Android applications
         run: gradle --stacktrace :app:lintRelease :runtime:lintRelease :sample-target:lintRelease
@@ -137,7 +146,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Android 12 two-UID IPC and external-APK smoke
+      - name: Android 12 two-UID IPC external-APK and lifecycle smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 31
