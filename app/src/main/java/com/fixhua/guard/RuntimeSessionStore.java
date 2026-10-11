@@ -60,11 +60,26 @@ final class RuntimeSessionStore {
         return session;
     }
 
+    synchronized Session active() throws Exception {
+        Session session = read();
+        if (session == null) return null;
+        if (System.currentTimeMillis() >= session.expiresAtMillis()) {
+            revoke();
+            return null;
+        }
+        CoreModels.ResolutionPlan expectedPlan = SyntheticSlicePlans.artifactReadPlan();
+        if (!constantEquals(expectedPlan.digestSha256(), session.planDigest())) {
+            throw new SecurityException("Runtime session plan is no longer valid");
+        }
+        verifyArtifact(artifactFile(session.artifactSha256()), session.artifactSha256());
+        return session;
+    }
+
     synchronized Session requireActive(
             String sessionId,
             String artifactSha256,
             String planDigest) throws Exception {
-        Session session = read();
+        Session session = active();
         if (session == null) throw new SecurityException("No active Runtime session");
         if (!constantEquals(session.sessionId(), sessionId)) {
             throw new SecurityException("Runtime session ID mismatch");
@@ -75,15 +90,6 @@ final class RuntimeSessionStore {
         if (!constantEquals(session.planDigest(), normalizeSha256(planDigest))) {
             throw new SecurityException("Runtime plan digest mismatch");
         }
-        if (System.currentTimeMillis() >= session.expiresAtMillis()) {
-            revoke();
-            throw new SecurityException("Runtime session expired");
-        }
-        CoreModels.ResolutionPlan expectedPlan = SyntheticSlicePlans.artifactReadPlan();
-        if (!constantEquals(expectedPlan.digestSha256(), session.planDigest())) {
-            throw new SecurityException("Runtime session plan is no longer valid");
-        }
-        verifyArtifact(artifactFile(session.artifactSha256()), session.artifactSha256());
         return session;
     }
 
