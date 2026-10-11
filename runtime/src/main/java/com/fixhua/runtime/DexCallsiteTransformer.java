@@ -40,10 +40,10 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * Creates a private derived execution APK while preserving the imported source artifact unchanged.
- * Slice V3 rewrites only explicitly declared compatibility callsites.
+ * Slice V4 rewrites only explicitly declared compatibility callsites.
  */
 final class DexCallsiteTransformer {
-    private static final String TRANSFORM_ID = "pm-context-permission-v3";
+    private static final String TRANSFORM_ID = "pm-context-permission-connectivity-v4";
 
     private static final String PM_SOURCE_CLASS = "Landroid/content/pm/PackageManager;";
     private static final String PM_SOURCE_METHOD = "getPackageInfo";
@@ -75,25 +75,43 @@ final class DexCallsiteTransformer {
                     List.of("Landroid/content/Context;", "Ljava/lang/String;"),
                     PERMISSION_RETURN);
 
+    private static final String HOST_SERVICE_METHOD = "getSystemService";
+    private static final String HOST_SERVICE_RETURN = "Ljava/lang/Object;";
+    private static final List<String> HOST_SERVICE_PARAMS = List.of("Ljava/lang/String;");
+    private static final ImmutableMethodReference HOST_SERVICE_HOOK_REFERENCE =
+            new ImmutableMethodReference(
+                    "Lcom/fixhua/runtime/ContextHooks;",
+                    HOST_SERVICE_METHOD,
+                    List.of("Landroid/content/Context;", "Ljava/lang/String;"),
+                    HOST_SERVICE_RETURN);
+
     record Result(
             File image,
             int packageManagerCallsites,
             int contextIdentityCallsites,
             int safeStubCallsites,
+            int hostRedirectCallsites,
             String sourceSha256,
             String imageSha256) {
         int rewrittenCallsites() {
-            return packageManagerCallsites + contextIdentityCallsites + safeStubCallsites;
+            return packageManagerCallsites
+                    + contextIdentityCallsites
+                    + safeStubCallsites
+                    + hostRedirectCallsites;
         }
     }
 
-    private record TargetCounts(int packageManager, int contextIdentity, int safeStub) {}
+    private record TargetCounts(
+            int packageManager,
+            int contextIdentity,
+            int safeStub,
+            int hostRedirect) {}
 
     static Result transform(Context context, File sourceApk) throws Exception {
         if (sourceApk == null || !sourceApk.isFile()) throw new IllegalStateException("Source APK missing");
         if (sourceApk.canWrite()) throw new SecurityException("Source APK must be immutable before transform");
         String sourceHash = sha256(sourceApk);
-        File directory = new File(context.getCodeCacheDir(), "transformed-images-v3");
+        File directory = new File(context.getCodeCacheDir(), "transformed-images-v4");
         if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("Cannot create transform directory");
         File output = new File(directory, sourceHash + "-" + TRANSFORM_ID + ".apk");
         File temp = new File(directory, output.getName() + ".tmp");
@@ -102,6 +120,7 @@ final class DexCallsiteTransformer {
         AtomicInteger packageManagerCallsites = new AtomicInteger();
         AtomicInteger contextIdentityCallsites = new AtomicInteger();
         AtomicInteger safeStubCallsites = new AtomicInteger();
+        AtomicInteger hostRedirectCallsites = new AtomicInteger();
         try (ZipFile input = new ZipFile(sourceApk);
              ZipOutputStream zipOut = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))) {
             Enumeration<? extends ZipEntry> entries = input.entries();
@@ -128,7 +147,8 @@ final class DexCallsiteTransformer {
                             zipOut,
                             packageManagerCallsites,
                             contextIdentityCallsites,
-                            safeStubCallsites);
+                            safeStubCallsites,
+                            hostRedirectCallsites);
                 } else {
                     try (InputStream in = new BufferedInputStream(input.getInputStream(entry))) { copy(in, zipOut); }
                 }
@@ -139,7 +159,10 @@ final class DexCallsiteTransformer {
             throw failure;
         }
 
-        if (packageManagerCallsites.get() + contextIdentityCallsites.get() + safeStubCallsites.get() <= 0) {
+        if (packageManagerCallsites.get()
+                + contextIdentityCallsites.get()
+                + safeStubCallsites.get()
+                + hostRedirectCallsites.get() <= 0) {
             temp.delete();
             throw new SecurityException("No declared compatibility callsite was found");
         }
@@ -160,6 +183,7 @@ final class DexCallsiteTransformer {
                 packageManagerCallsites.get(),
                 contextIdentityCallsites.get(),
                 safeStubCallsites.get(),
+                hostRedirectCallsites.get(),
                 sourceHash,
                 sha256(output));
     }
@@ -169,7 +193,8 @@ final class DexCallsiteTransformer {
             OutputStream destination,
             AtomicInteger packageManagerCallsites,
             AtomicInteger contextIdentityCallsites,
-            AtomicInteger safeStubCallsites) throws Exception {
+            AtomicInteger safeStubCallsites,
+            AtomicInteger hostRedirectCallsites) throws Exception {
         File tempDex = File.createTempFile("fixhua-rewritten-", ".dex");
         try {
             DexFile dex;
@@ -180,6 +205,7 @@ final class DexCallsiteTransformer {
             packageManagerCallsites.addAndGet(counts.packageManager());
             contextIdentityCallsites.addAndGet(counts.contextIdentity());
             safeStubCallsites.addAndGet(counts.safeStub());
+            hostRedirectCallsites.addAndGet(counts.hostRedirect());
 
             RewriterModule module = new RewriterModule() {
                 @Override public Rewriter<Instruction> getInstructionRewriter(Rewriters rewriters) {
@@ -204,6 +230,7 @@ final class DexCallsiteTransformer {
         int packageManager = 0;
         int contextIdentity = 0;
         int safeStub = 0;
+        int hostRedirect = 0;
         for (ClassDef classDef : dex.getClasses()) {
             for (Method method : classDef.getMethods()) {
                 MethodImplementation implementation = method.getImplementation();
@@ -214,10 +241,11 @@ final class DexCallsiteTransformer {
                     if (isPackageManagerTarget(reference)) packageManager++;
                     else if (isContextIdentityTarget(reference)) contextIdentity++;
                     else if (isPermissionSafeStubTarget(reference)) safeStub++;
+                    else if (isHostServiceRedirectTarget(reference)) hostRedirect++;
                 }
             }
         }
-        return new TargetCounts(packageManager, contextIdentity, safeStub);
+        return new TargetCounts(packageManager, contextIdentity, safeStub, hostRedirect);
     }
 
     private static Instruction rewriteInstruction(Instruction instruction) {
@@ -269,6 +297,7 @@ final class DexCallsiteTransformer {
         if (isPackageManagerTarget(method)) return PM_HOOK_REFERENCE;
         if (isContextIdentityTarget(method)) return CONTEXT_IDENTITY_HOOK_REFERENCE;
         if (isPermissionSafeStubTarget(method)) return PERMISSION_HOOK_REFERENCE;
+        if (isHostServiceRedirectTarget(method)) return HOST_SERVICE_HOOK_REFERENCE;
         return null;
     }
 
@@ -291,6 +320,13 @@ final class DexCallsiteTransformer {
                 && PERMISSION_METHOD.equals(method.getName())
                 && PERMISSION_RETURN.equals(method.getReturnType())
                 && parametersEqual(method.getParameterTypes(), PERMISSION_PARAMS);
+    }
+
+    private static boolean isHostServiceRedirectTarget(MethodReference method) {
+        return CONTEXT_SOURCE_CLASS.equals(method.getDefiningClass())
+                && HOST_SERVICE_METHOD.equals(method.getName())
+                && HOST_SERVICE_RETURN.equals(method.getReturnType())
+                && parametersEqual(method.getParameterTypes(), HOST_SERVICE_PARAMS);
     }
 
     private static boolean parametersEqual(
