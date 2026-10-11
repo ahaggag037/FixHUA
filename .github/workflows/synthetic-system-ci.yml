@@ -136,7 +136,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Android 12 two-UID and IPC security smoke
+      - name: Android 12 two-UID IPC and external-APK smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 31
@@ -165,9 +165,10 @@ jobs:
             adb logcat -c
             adb shell am start -W -n com.fixhua.guard/.MainActivity >/dev/null
             adb shell am start -W -n com.fixhua.runtime/.RuntimeActivity >/dev/null
-            sleep 2
+            sleep 3
             adb logcat -d -v brief | tee dist/runtime-logcat.txt
             grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=1' dist/runtime-logcat.txt
+            grep -q 'FixHUARuntime.*artifactProbe=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
 
             adb logcat -c
             adb shell am start -W -n com.fixhua.sampletarget/.SampleActivity >/dev/null
