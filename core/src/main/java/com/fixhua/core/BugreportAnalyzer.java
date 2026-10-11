@@ -26,6 +26,8 @@ public final class BugreportAnalyzer {
     private static final long MAX_MAIN_TEXT_BYTES = 64L * 1024L * 1024L;
     private static final int MAX_ENTRIES = 20_000;
     private static final int MAX_GBOX_PROCESS_NAMES = 64;
+    private static final String RUNNING_PROCESSES_SECTION =
+            "ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)";
 
     private static final Pattern INT_VALUE = Pattern.compile("=(-?\\d+)\\s*$");
     private static final Pattern PROCESS_RECORD = Pattern.compile(
@@ -123,6 +125,7 @@ public final class BugreportAnalyzer {
         String webViewPackage = "";
         String webViewVersion = "";
         long scannedBytes = 0;
+        boolean inRunningProcessesSection = false;
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8), 64 * 1024);
         String line;
@@ -133,6 +136,14 @@ public final class BugreportAnalyzer {
             }
 
             String trimmed = line.trim();
+            if (trimmed.equals(RUNNING_PROCESSES_SECTION)) {
+                inRunningProcessesSection = true;
+                continue;
+            }
+            if (inRunningProcessesSection && trimmed.startsWith("---------------")) {
+                inRunningProcessesSection = false;
+            }
+
             if (trimmed.contains("mOverrideMaxCachedProcesses=")) {
                 override = trailingInt(trimmed, override);
             } else if (trimmed.contains("mCustomizedMaxCachedProcesses=")) {
@@ -154,7 +165,9 @@ public final class BugreportAnalyzer {
                 }
             }
 
-            if (trimmed.contains("ProcessRecord{") && trimmed.contains("com.gbox.android")) {
+            if (inRunningProcessesSection
+                    && trimmed.contains("ProcessRecord{")
+                    && trimmed.contains("com.gbox.android")) {
                 Matcher process = PROCESS_RECORD.matcher(trimmed);
                 if (process.find() && gboxProcesses.size() < MAX_GBOX_PROCESS_NAMES) {
                     String name = process.group(1);
