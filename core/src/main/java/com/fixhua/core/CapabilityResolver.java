@@ -54,19 +54,25 @@ public final class CapabilityResolver {
             throw new ResolutionException("Dependency cycle at capability " + capabilityId);
         }
 
-        List<ProviderDescriptor> candidates = byCapability.getOrDefault(capabilityId, List.of()).stream()
-                .filter(p -> semanticAcceptable(p.semantics(), minimumSemantics))
-                .filter(p -> p.truthScopes().stream().anyMatch(allowedTruthScopes::contains))
-                .filter(p -> destructiveAllowed || !p.destructive())
-                .sorted(providerComparator(allowedTruthScopes))
-                .toList();
+        // Keep this path compatible with the Android libcore available on API 29+.
+        // In particular, do not use Stream.toList(), which is a Java 16 API and is not
+        // implemented by Android 12's java.util.stream.Stream.
+        List<ProviderDescriptor> candidates = new ArrayList<>();
+        for (ProviderDescriptor provider : byCapability.getOrDefault(capabilityId, List.of())) {
+            if (!semanticAcceptable(provider.semantics(), minimumSemantics)) continue;
+            if (!hasCompatibleTruthScope(provider.truthScopes(), allowedTruthScopes)) continue;
+            if (!destructiveAllowed && provider.destructive()) continue;
+            candidates.add(provider);
+        }
+        candidates.sort(providerComparator(allowedTruthScopes));
 
         ResolutionException lastFailure = null;
         for (ProviderDescriptor provider : candidates) {
             LinkedHashMap<Integer, ResolutionStep> trialSteps = new LinkedHashMap<>(steps);
             Set<Integer> trialVisiting = new HashSet<>(visiting);
             try {
-                List<Integer> dependencies = provider.requires().stream().sorted().toList();
+                List<Integer> dependencies = new ArrayList<>(provider.requires());
+                dependencies.sort(Integer::compareTo);
                 for (int dep : dependencies) {
                     // A synthetic requested outcome can legitimately depend on a real host action,
                     // and a real host outcome can depend on a synthetic planning primitive. Truth
@@ -128,6 +134,13 @@ public final class CapabilityResolver {
                 .thenComparing(ProviderDescriptor::providerVersion);
     }
 
+    private static boolean hasCompatibleTruthScope(Set<TruthScope> offered, Set<TruthScope> allowed) {
+        for (TruthScope scope : offered) {
+            if (allowed.contains(scope)) return true;
+        }
+        return false;
+    }
+
     private static int bestScopeRank(Set<TruthScope> offered, Set<TruthScope> allowed) {
         int best = Integer.MAX_VALUE;
         for (TruthScope scope : offered) {
@@ -138,10 +151,13 @@ public final class CapabilityResolver {
 
     private static TruthScope chooseTruthScope(Set<TruthScope> offered, Set<TruthScope> allowed)
             throws ResolutionException {
-        return offered.stream()
-                .filter(allowed::contains)
-                .min(Comparator.comparingInt(Enum::ordinal))
-                .orElseThrow(() -> new ResolutionException("No compatible truth scope"));
+        TruthScope best = null;
+        for (TruthScope scope : offered) {
+            if (!allowed.contains(scope)) continue;
+            if (best == null || scope.ordinal() < best.ordinal()) best = scope;
+        }
+        if (best == null) throw new ResolutionException("No compatible truth scope");
+        return best;
     }
 
     private static boolean semanticAcceptable(ProviderSemantics offered, ProviderSemantics minimum) {
