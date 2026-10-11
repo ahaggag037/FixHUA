@@ -24,4 +24,21 @@ public final class SyntheticSlicePlansTest {
         assertEquals(CoreModels.ProviderSemantics.EXACT, step.semantics());
         assertFalse(first.digestSha256().isBlank());
     }
+
+    @Test
+    public void runtimeSessionPlanIncludesArtifactDependencyThenSyntheticIdentity() throws Exception {
+        ResolutionPlan first = SyntheticSlicePlans.runtimeSessionPlan();
+        ResolutionPlan second = SyntheticSlicePlans.runtimeSessionPlan();
+        assertEquals(first.digestSha256(), second.digestSha256());
+        assertEquals(2, first.steps().size());
+
+        ResolutionStep artifact = first.steps().get(0);
+        ResolutionStep identity = first.steps().get(1);
+        assertEquals(SyntheticSlicePlans.CAPABILITY_READ_IMPORTED_ARTIFACT, artifact.capabilityId());
+        assertEquals(CoreModels.TruthScope.HOST_DELEGATED, artifact.truthScope());
+        assertEquals(SyntheticSlicePlans.CAPABILITY_SYNTHETIC_PACKAGE_IDENTITY, identity.capabilityId());
+        assertEquals("runtime.synthetic-package-identity", identity.providerId());
+        assertEquals(CoreModels.AuthorityPlane.P5_SYNTHETIC, identity.authorityPlane());
+        assertEquals(CoreModels.TruthScope.SYNTHETIC_VIEW, identity.truthScope());
+    }
 }
