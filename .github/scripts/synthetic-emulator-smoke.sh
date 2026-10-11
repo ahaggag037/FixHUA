@@ -14,9 +14,9 @@ on_error() {
     fi
   done
   echo "--- runtime log tail ---"
-  [[ -f dist/runtime-logcat.txt ]] && tail -n 200 dist/runtime-logcat.txt || true
+  [[ -f dist/runtime-logcat.txt ]] && tail -n 260 dist/runtime-logcat.txt || true
   echo "--- lifecycle log tail ---"
-  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 250 dist/runtime-lifecycle-logcat.txt || true
+  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 300 dist/runtime-lifecycle-logcat.txt || true
   echo "--- sample log tail ---"
   [[ -f dist/sample-logcat.txt ]] && tail -n 200 dist/sample-logcat.txt || true
   exit "$rc"
@@ -59,29 +59,40 @@ printf 'controller=%s runtime=%s sample=%s\n' "$controller_uid" "$runtime_uid" "
 echo "UID_BOUNDARY_PASS"
 endstep
 
-step "Verify trusted Runtime can authenticate to Controller"
+step "Import foreign sample into Controller store and launch trusted Runtime session"
 adb logcat -c
 adb shell am force-stop com.fixhua.guard || true
 adb shell am force-stop com.fixhua.runtime || true
-adb shell am start -W -n com.fixhua.guard/.MainActivity
-adb shell am start -W -n com.fixhua.runtime/.RuntimeActivity
-sleep 4
+# This activity is guarded by android.permission.DUMP and additionally refuses non-emulator
+# hardware. It copies the installed foreign-signed sample into Controller-private storage,
+# creates the persisted session, then launches Runtime with the session envelope.
+adb shell am start -W -n com.fixhua.guard/.AcceptanceBootstrapActivity
+sleep 6
 adb logcat -d -v brief > dist/runtime-logcat.txt
 cat dist/runtime-logcat.txt
+grep -q 'FixHUAAcceptance.*sessionReady=true package=com.fixhua.sampletarget' dist/runtime-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true phase=activityOnCreate' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=1' dist/runtime-logcat.txt
-echo "BRIDGE_AUTH_PASS"
+grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=2' dist/runtime-logcat.txt
+if grep -q 'FixHUARuntime.*legacyArtifactFallback=true' dist/runtime-logcat.txt; then
+  echo "Runtime unexpectedly used legacy installed-package fallback" >&2
+  false
+fi
+echo "SESSION_BRIDGE_AUTH_PASS"
 endstep
 
-step "Verify Runtime loads code and resources from external APK"
-grep -q 'FixHUARuntime.*artifactProbe=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
-echo "ARTIFACT_LOADER_PASS"
+step "Verify Runtime receives read-only Controller artifact and loads code/resources"
+grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*imageReadOnly=true' dist/runtime-logcat.txt
+if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-logcat.txt; then
+  echo "Session artifact verification failed" >&2
+  false
+fi
+echo "SESSION_ARTIFACT_LOADER_PASS"
 endstep
 
-step "Verify Application and Resources survive configuration-driven Activity recreation"
+step "Verify Application Resources and session artifact survive Activity recreation"
 adb logcat -c
-# Force a deterministic orientation transition while the Runtime activity is in the foreground.
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
 sleep 3
@@ -90,11 +101,14 @@ sleep 3
 adb logcat -d -v brief > dist/runtime-lifecycle-logcat.txt
 cat dist/runtime-lifecycle-logcat.txt
 
-# Application must remain a valid process-wide invariant throughout configuration changes.
 grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-lifecycle-logcat.txt
+if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
+  echo "Session artifact did not survive recreation" >&2
+  false
+fi
 
-# With no manifest configChanges override, orientation must recreate RuntimeActivity.
 max_create_count="$(grep -o 'FixHUARuntime.*activityReady=true createCount=[0-9]*' dist/runtime-lifecycle-logcat.txt \
   | sed 's/.*createCount=//' \
   | sort -n \
@@ -102,12 +116,10 @@ max_create_count="$(grep -o 'FixHUARuntime.*activityReady=true createCount=[0-9]
 [[ -n "$max_create_count" ]]
 (( max_create_count >= 2 ))
 
-# Runtime must still be alive and its foreground Activity resolvable after the recreation cycle.
 adb shell pidof com.fixhua.runtime | tee dist/runtime-pid-after-rotation.txt
 grep -q 'com.fixhua.runtime/.RuntimeActivity' <(adb shell dumpsys activity activities | tr -d '\r')
-echo "LIFECYCLE_INTEGRITY_PASS createCount=$max_create_count"
+echo "LIFECYCLE_SESSION_INTEGRITY_PASS createCount=$max_create_count"
 
-# Restore automatic rotation for the remaining smoke steps.
 adb shell settings put system accelerometer_rotation 1 || true
 endstep
 
