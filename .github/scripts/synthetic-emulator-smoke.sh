@@ -9,9 +9,9 @@ on_error() {
   for f in dist/controller_uid.txt dist/runtime_uid.txt dist/sample_uid.txt dist/uid-boundary.txt; do
     [[ -f "$f" ]] && { echo "### $f"; cat "$f"; }
   done
-  [[ -f dist/runtime-logcat.txt ]] && tail -n 420 dist/runtime-logcat.txt || true
-  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 420 dist/runtime-lifecycle-logcat.txt || true
-  [[ -f dist/runtime-recovery-logcat.txt ]] && tail -n 460 dist/runtime-recovery-logcat.txt || true
+  [[ -f dist/runtime-logcat.txt ]] && tail -n 520 dist/runtime-logcat.txt || true
+  [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 520 dist/runtime-lifecycle-logcat.txt || true
+  [[ -f dist/runtime-recovery-logcat.txt ]] && tail -n 560 dist/runtime-recovery-logcat.txt || true
   [[ -f dist/sample-logcat.txt ]] && tail -n 200 dist/sample-logcat.txt || true
   exit "$rc"
 }
@@ -82,6 +82,19 @@ printf '%s\n' "$source_sha" > dist/session-source-sha256.txt
 echo "SYNTHETIC_AND_HOST_REDIRECT_VIEW_PASS"
 endstep
 
+step "Verify imported screen ProxyActivity lifecycle and typed evidence stream"
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onCreate marker=create=1;resume=0;config=0;destroy=0' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onResume marker=create=1;resume=1;config=0;destroy=0' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SYNTHETIC.*truth=SYNTHETIC_VIEW' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SAFE_STUB.*truth=SYNTHETIC_VIEW.*outcome=DENIED' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=DELEGATED.*truth=HOST_DELEGATED.*subject=system-service:connectivity.*outcome=PRESENT' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=HOST.*truth=HOST_REAL.*subject=package:com.gbox.android.*outcome=ABSENT' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=UNSUPPORTED.*outcome=DENIED_OUT_OF_PLAN' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onCreate' dist/runtime-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onResume' dist/runtime-logcat.txt
+echo "STRUCTURED_EXECUTION_EVIDENCE_PASS"
+endstep
+
 step "Verify lifecycle recreation preserves synthetic, safe-stub, delegated and host truths"
 adb logcat -c
 adb shell settings put system accelerometer_rotation 0
@@ -96,6 +109,11 @@ grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecyc
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onDestroy' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onCreate marker=create=1;resume=0;config=0;destroy=0' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onResume marker=create=1;resume=1;config=0;destroy=0' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onDestroy' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUAEvidence.*decision=DELEGATED.*subject=system-service:connectivity.*outcome=PRESENT' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
   echo "Transformed session did not survive recreation" >&2
   false
@@ -135,6 +153,11 @@ grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=4.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*hostRedirectCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;' dist/runtime-recovery-logcat.txt
 grep -q "FixHUARuntime.*sessionArtifact=true.*sourceSha256=$source_sha" dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onCreate marker=create=1;resume=0;config=0;destroy=0' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onResume marker=create=1;resume=1;config=0;destroy=0' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SAFE_STUB.*outcome=DENIED' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUAEvidence.*decision=DELEGATED.*subject=system-service:connectivity.*outcome=PRESENT' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onResume' dist/runtime-recovery-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-recovery-logcat.txt; then
   echo "Recovered Runtime failed to rebuild the active session" >&2
   false
