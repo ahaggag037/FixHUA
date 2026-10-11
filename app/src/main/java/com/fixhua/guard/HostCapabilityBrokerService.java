@@ -14,10 +14,11 @@ import java.io.File;
 
 public final class HostCapabilityBrokerService extends Service {
     static final String DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
-    static final int PROTOCOL_VERSION = 2;
+    static final int PROTOCOL_VERSION = 3;
     static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     static final int TRANSACTION_OPEN_SESSION_ARTIFACT = IBinder.FIRST_CALL_TRANSACTION + 1;
     static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
+    static final int TRANSACTION_GET_SYNTHETIC_PACKAGE_IDENTITY = IBinder.FIRST_CALL_TRANSACTION + 3;
     private static final String EXPECTED_RUNTIME_PACKAGE = "com.fixhua.runtime";
 
     private final Binder bridge = new Binder() {
@@ -50,12 +51,7 @@ public final class HostCapabilityBrokerService extends Service {
                         reply.writeInt(0);
                     } else {
                         reply.writeInt(1);
-                        reply.writeString(session.sessionId());
-                        reply.writeString(session.artifactSha256());
-                        reply.writeString(session.planDigest());
-                        reply.writeString(session.packageName());
-                        reply.writeString(session.recipeId());
-                        reply.writeInt(session.recipeVersion());
+                        writeSessionEnvelope(reply, session);
                     }
                     return true;
                 } catch (SecurityException failure) {
@@ -69,14 +65,10 @@ public final class HostCapabilityBrokerService extends Service {
 
             if (code == TRANSACTION_OPEN_SESSION_ARTIFACT) {
                 data.enforceInterface(DESCRIPTOR);
-                String sessionId = bounded(data.readString(), 128, false, "sessionId");
-                String artifactSha256 = bounded(data.readString(), 64, true, "artifactSha256");
-                String planDigest = bounded(data.readString(), 64, true, "planDigest");
-                enforceNoTrailingData(data);
-
+                SessionRequest request = readSessionRequest(data);
                 try {
                     File artifact = new RuntimeSessionStore(HostCapabilityBrokerService.this)
-                            .requireArtifactFile(sessionId, artifactSha256, planDigest);
+                            .requireArtifactFile(request.sessionId(), request.artifactSha256(), request.planDigest());
                     try (ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(
                             artifact, ParcelFileDescriptor.MODE_READ_ONLY)) {
                         reply.writeNoException();
@@ -93,6 +85,32 @@ public final class HostCapabilityBrokerService extends Service {
                 }
             }
 
+            if (code == TRANSACTION_GET_SYNTHETIC_PACKAGE_IDENTITY) {
+                data.enforceInterface(DESCRIPTOR);
+                SessionRequest request = readSessionRequest(data);
+                try {
+                    RuntimeSessionStore.Session session = new RuntimeSessionStore(
+                            HostCapabilityBrokerService.this).requireActive(
+                                    request.sessionId(), request.artifactSha256(), request.planDigest());
+                    reply.writeNoException();
+                    reply.writeString(session.packageName());
+                    reply.writeString(session.versionName());
+                    reply.writeLong(session.versionCode());
+                    reply.writeInt(session.minSdk());
+                    reply.writeInt(session.targetSdk());
+                    reply.writeString(session.applicationClassName());
+                    reply.writeString(session.primarySigningSha256());
+                    reply.writeString("SYNTHETIC_VIEW");
+                    return true;
+                } catch (SecurityException failure) {
+                    throw failure;
+                } catch (Exception failure) {
+                    RemoteException remote = new RemoteException("Synthetic package identity unavailable");
+                    remote.initCause(failure);
+                    throw remote;
+                }
+            }
+
             return super.onTransact(code, data, reply, flags);
         }
     };
@@ -102,13 +120,28 @@ public final class HostCapabilityBrokerService extends Service {
         return bridge;
     }
 
+    private static void writeSessionEnvelope(Parcel reply, RuntimeSessionStore.Session session) {
+        reply.writeString(session.sessionId());
+        reply.writeString(session.artifactSha256());
+        reply.writeString(session.planDigest());
+        reply.writeString(session.packageName());
+        reply.writeString(session.recipeId());
+        reply.writeInt(session.recipeVersion());
+    }
+
+    private static SessionRequest readSessionRequest(Parcel data) {
+        String sessionId = bounded(data.readString(), 128, false, "sessionId");
+        String artifactSha256 = bounded(data.readString(), 64, true, "artifactSha256");
+        String planDigest = bounded(data.readString(), 64, true, "planDigest");
+        enforceNoTrailingData(data);
+        return new SessionRequest(sessionId, artifactSha256, planDigest);
+    }
+
     private void enforceTrustedRuntimeCaller() {
         int uid = Binder.getCallingUid();
         PackageManager pm = getPackageManager();
         String[] packages = pm.getPackagesForUid(uid);
-        if (packages == null) {
-            throw new SecurityException("Caller UID has no visible packages: " + uid);
-        }
+        if (packages == null) throw new SecurityException("Caller UID has no visible packages: " + uid);
 
         boolean runtimeAtUid = false;
         for (String pkg : packages) {
@@ -117,10 +150,7 @@ public final class HostCapabilityBrokerService extends Service {
                 break;
             }
         }
-        if (!runtimeAtUid) {
-            throw new SecurityException("Caller UID is not FixHUA Runtime: " + uid);
-        }
-
+        if (!runtimeAtUid) throw new SecurityException("Caller UID is not FixHUA Runtime: " + uid);
         if (pm.checkSignatures(getPackageName(), EXPECTED_RUNTIME_PACKAGE)
                 != PackageManager.SIGNATURE_MATCH) {
             throw new SecurityException("FixHUA Runtime signing identity mismatch");
@@ -138,4 +168,6 @@ public final class HostCapabilityBrokerService extends Service {
     private static void enforceNoTrailingData(Parcel data) {
         if (data.dataAvail() != 0) throw new SecurityException("Unexpected broker payload");
     }
+
+    private record SessionRequest(String sessionId, String artifactSha256, String planDigest) {}
 }
