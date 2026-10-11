@@ -129,8 +129,6 @@ final class SyntheticRestrictedContext extends ContextWrapper {
         GuestDataPlane plane = requireDataPlane();
         info.packageName = plane.packageName();
         info.dataDir = plane.root().getAbsolutePath();
-        info.credentialProtectedDataDir = info.dataDir;
-        info.deviceProtectedDataDir = info.dataDir;
         return info;
     }
 
