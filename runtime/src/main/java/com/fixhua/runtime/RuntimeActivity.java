@@ -21,13 +21,16 @@ public final class RuntimeActivity extends Activity {
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     private static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
-    private static final int SESSION_PROTOCOL_VERSION = 4;
+    private static final int SESSION_PROTOCOL_VERSION = 5;
     private static final String ABSENT_PACKAGE_PROBE = "com.fixhua.synthetic.absent";
+    private static final int OUT_OF_PLAN_CAPABILITY_PROBE = 9999;
     private static final AtomicInteger CREATE_COUNT = new AtomicInteger();
 
     public static final String EXTRA_SESSION_ID = "com.fixhua.runtime.extra.SESSION_ID";
     public static final String EXTRA_ARTIFACT_SHA256 = "com.fixhua.runtime.extra.ARTIFACT_SHA256";
     public static final String EXTRA_PLAN_DIGEST = "com.fixhua.runtime.extra.PLAN_DIGEST";
+    public static final String EXTRA_ACCEPTANCE_SECURITY_PROBE =
+            "com.fixhua.runtime.extra.ACCEPTANCE_SECURITY_PROBE";
 
     private TextView status;
     private boolean bound;
@@ -50,7 +53,7 @@ public final class RuntimeActivity extends Activity {
                         + "\nController bridge: authenticated\nProtocol: " + protocol);
 
                 if (protocol < SESSION_PROTOCOL_VERSION) {
-                    throw new SecurityException("Controller protocol does not support synthetic package queries");
+                    throw new SecurityException("Controller protocol does not support host capability delegation");
                 }
 
                 SessionArgs session = SessionArgs.from(getIntent());
@@ -83,12 +86,37 @@ public final class RuntimeActivity extends Activity {
                 Log.i(TAG, "packageManagerView=true package=" + selfView.projection().packageName()
                         + " selfFound=true absentFound=false truth=" + selfView.truthScope());
 
+                HostCapabilityClient.GBoxFact gboxFact = HostCapabilityClient.queryGBox(
+                        service,
+                        session.sessionId(),
+                        session.artifactSha256(),
+                        session.planDigest());
+                Log.i(TAG, "hostCapability=true capability=1002 gboxInstalled=" + gboxFact.installed()
+                        + " version=" + gboxFact.versionName()
+                        + " versionCode=" + gboxFact.versionCode()
+                        + " truth=" + gboxFact.truthScope());
+
+                if (getIntent() != null
+                        && getIntent().getBooleanExtra(EXTRA_ACCEPTANCE_SECURITY_PROBE, false)) {
+                    HostCapabilityClient.requireDenied(
+                            service,
+                            session.sessionId(),
+                            session.artifactSha256(),
+                            session.planDigest(),
+                            OUT_OF_PLAN_CAPABILITY_PROBE);
+                    Log.i(TAG, "outOfPlanDenied=true capability=" + OUT_OF_PLAN_CAPABILITY_PROBE);
+                }
+
                 status.append("\nSynthetic package: " + selfView.projection().packageName());
                 status.append("\nSynthetic version: " + selfView.projection().versionName()
                         + " (" + selfView.projection().versionCode() + ")");
                 status.append("\nSynthetic targetSdk: " + selfView.projection().targetSdk());
                 status.append("\nPackage view: imported package only");
-                status.append("\nTruth scope: " + selfView.truthScope());
+                status.append("\nSynthetic truth: " + selfView.truthScope());
+                status.append("\nHost GBox: " + (gboxFact.installed()
+                        ? gboxFact.versionName() + " (" + gboxFact.versionCode() + ")"
+                        : "not installed"));
+                status.append("\nHost truth: " + gboxFact.truthScope());
 
                 runSessionArtifactProbe(service, session, selfView.projection().packageName());
             } catch (Exception e) {
