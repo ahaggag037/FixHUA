@@ -21,7 +21,8 @@ public final class RuntimeActivity extends Activity {
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
     private static final int TRANSACTION_GET_ACTIVE_SESSION = IBinder.FIRST_CALL_TRANSACTION + 2;
-    private static final int SESSION_PROTOCOL_VERSION = 3;
+    private static final int SESSION_PROTOCOL_VERSION = 4;
+    private static final String ABSENT_PACKAGE_PROBE = "com.fixhua.synthetic.absent";
     private static final AtomicInteger CREATE_COUNT = new AtomicInteger();
 
     public static final String EXTRA_SESSION_ID = "com.fixhua.runtime.extra.SESSION_ID";
@@ -49,7 +50,7 @@ public final class RuntimeActivity extends Activity {
                         + "\nController bridge: authenticated\nProtocol: " + protocol);
 
                 if (protocol < SESSION_PROTOCOL_VERSION) {
-                    throw new SecurityException("Controller protocol does not support synthetic package view");
+                    throw new SecurityException("Controller protocol does not support synthetic package queries");
                 }
 
                 SessionArgs session = SessionArgs.from(getIntent());
@@ -66,11 +67,34 @@ public final class RuntimeActivity extends Activity {
                         + " versionCode=" + identity.versionCode()
                         + " targetSdk=" + identity.targetSdk()
                         + " truth=" + identity.truthScope());
-                status.append("\nSynthetic package: " + identity.packageName());
-                status.append("\nSynthetic version: " + identity.versionName()
-                        + " (" + identity.versionCode() + ")");
-                status.append("\nSynthetic targetSdk: " + identity.targetSdk());
-                status.append("\nTruth scope: " + identity.truthScope());
+
+                SyntheticPackageManagerView.QueryResult selfView = SyntheticPackageManagerView.query(
+                        service,
+                        session.sessionId(),
+                        session.artifactSha256(),
+                        session.planDigest(),
+                        identity.packageName());
+                if (!selfView.found() || selfView.projection() == null) {
+                    throw new SecurityException("Imported package missing from synthetic package view");
+                }
+                SyntheticPackageManagerView.QueryResult absentView = SyntheticPackageManagerView.query(
+                        service,
+                        session.sessionId(),
+                        session.artifactSha256(),
+                        session.planDigest(),
+                        ABSENT_PACKAGE_PROBE);
+                if (absentView.found()) {
+                    throw new SecurityException("Synthetic package view fabricated an unconfigured package");
+                }
+                Log.i(TAG, "packageManagerView=true package=" + selfView.projection().packageName()
+                        + " selfFound=true absentFound=false truth=" + selfView.truthScope());
+
+                status.append("\nSynthetic package: " + selfView.projection().packageName());
+                status.append("\nSynthetic version: " + selfView.projection().versionName()
+                        + " (" + selfView.projection().versionCode() + ")");
+                status.append("\nSynthetic targetSdk: " + selfView.projection().targetSdk());
+                status.append("\nPackage view: imported package only");
+                status.append("\nTruth scope: " + selfView.truthScope());
 
                 runSessionArtifactProbe(service, session);
             } catch (Exception e) {
