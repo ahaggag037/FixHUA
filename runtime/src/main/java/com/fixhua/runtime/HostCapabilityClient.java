@@ -3,6 +3,8 @@ package com.fixhua.runtime;
 import android.os.IBinder;
 import android.os.Parcel;
 
+import com.fixhua.core.CoreModels;
+import com.fixhua.core.ExecutionEvidence;
 import com.fixhua.core.SyntheticSlicePlans;
 
 /** Narrow Runtime client for Controller-owned host capabilities authorized by the active plan. */
@@ -39,6 +41,13 @@ final class HostCapabilityClient {
             if (!installed && (versionCode != 0L || (versionName != null && !versionName.isEmpty()))) {
                 throw new SecurityException("Malformed absent host package fact");
             }
+            ExecutionEvidenceEmitter.emit(
+                    SyntheticSlicePlans.CAPABILITY_HOST_GBOX_PACKAGE_FACT,
+                    "controller.host-gbox-package-fact",
+                    ExecutionEvidence.Decision.HOST,
+                    CoreModels.TruthScope.HOST_REAL,
+                    "package:com.gbox.android",
+                    installed ? "INSTALLED" : "ABSENT");
             return new GBoxFact(
                     installed,
                     versionName == null ? "" : versionName,
@@ -59,6 +68,13 @@ final class HostCapabilityClient {
         try {
             reply = execute(broker, sessionId, artifactSha256, planDigest, capabilityId);
         } catch (SecurityException expected) {
+            ExecutionEvidenceEmitter.emit(
+                    capabilityId,
+                    "controller.plan-gate",
+                    ExecutionEvidence.Decision.UNSUPPORTED,
+                    CoreModels.TruthScope.HOST_DELEGATED,
+                    "host-capability:" + capabilityId,
+                    "DENIED_OUT_OF_PLAN");
             return;
         } finally {
             if (reply != null) reply.recycle();
