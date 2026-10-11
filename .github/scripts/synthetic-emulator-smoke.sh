@@ -11,6 +11,7 @@ on_error() {
   done
   [[ -f dist/runtime-logcat.txt ]] && tail -n 420 dist/runtime-logcat.txt || true
   [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 420 dist/runtime-lifecycle-logcat.txt || true
+  [[ -f dist/runtime-recovery-logcat.txt ]] && tail -n 460 dist/runtime-recovery-logcat.txt || true
   [[ -f dist/sample-logcat.txt ]] && tail -n 200 dist/sample-logcat.txt || true
   exit "$rc"
 }
@@ -74,6 +75,10 @@ if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-logcat.txt; then
   echo "Transformed session artifact verification failed" >&2
   false
 fi
+source_sha="$(grep -m1 'FixHUARuntime.*sessionArtifact=true' dist/runtime-logcat.txt \
+  | sed -n 's/.*sourceSha256=\([0-9a-f][0-9a-f]*\).*/\1/p')"
+[[ ${#source_sha} -eq 64 ]]
+printf '%s\n' "$source_sha" > dist/session-source-sha256.txt
 echo "SYNTHETIC_CONTEXT_IDENTITY_PASS"
 endstep
 
@@ -102,6 +107,43 @@ adb shell pidof com.fixhua.runtime | tee dist/runtime-pid-after-rotation.txt
 grep -q 'com.fixhua.runtime/.RuntimeActivity' <(adb shell dumpsys activity activities | tr -d '\r')
 echo "LIFECYCLE_SYNTHETIC_REALITY_PASS createCount=$max_create_count"
 adb shell settings put system accelerometer_rotation 1 || true
+endstep
+
+step "Verify Runtime process-death recovery from Controller-owned session"
+adb logcat -c
+runtime_pid_before="$(adb shell pidof com.fixhua.runtime | tr -d '\r')"
+[[ -n "$runtime_pid_before" ]]
+printf '%s\n' "$runtime_pid_before" > dist/runtime-pid-before-recovery.txt
+adb shell am force-stop com.fixhua.runtime
+sleep 2
+runtime_pid_stopped="$(adb shell pidof com.fixhua.runtime | tr -d '\r' || true)"
+[[ -z "$runtime_pid_stopped" ]]
+adb shell am start -W -n com.fixhua.runtime/.RuntimeActivity
+sleep 8
+runtime_pid_after="$(adb shell pidof com.fixhua.runtime | tr -d '\r')"
+[[ -n "$runtime_pid_after" ]]
+[[ "$runtime_pid_after" != "$runtime_pid_before" ]]
+printf '%s\n' "$runtime_pid_after" > dist/runtime-pid-after-recovery.txt
+adb logcat -d -v brief > dist/runtime-recovery-logcat.txt
+cat dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=5' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*activeSession=true package=com.fixhua.sampletarget recipe=sample.synthetic.v1:5' dist/runtime-recovery-logcat.txt
+grep -q "FixHUARuntime.*activeSession=true.*sha256=$source_sha" dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-recovery-logcat.txt
+grep -q "FixHUARuntime.*sessionArtifact=true.*sourceSha256=$source_sha" dist/runtime-recovery-logcat.txt
+if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-recovery-logcat.txt; then
+  echo "Recovered Runtime failed to rebuild the active session" >&2
+  false
+fi
+if grep -q 'FixHUARuntime.*outOfPlanDenied=true capability=9999' dist/runtime-recovery-logcat.txt; then
+  echo "Emulator-only security probe leaked into normal recovery launch" >&2
+  false
+fi
+echo "RUNTIME_PROCESS_RECOVERY_PASS oldPid=$runtime_pid_before newPid=$runtime_pid_after"
 endstep
 
 step "Verify foreign-signed sample cannot bind Controller bridge"
