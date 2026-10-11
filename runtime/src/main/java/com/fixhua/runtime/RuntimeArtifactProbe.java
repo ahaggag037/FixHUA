@@ -68,7 +68,11 @@ final class RuntimeArtifactProbe {
         try {
             resourceMarker = resources.getString(markerResId);
         } finally {
+            // Ownership order matters on API 30+: a ResourcesProvider cannot be closed while
+            // any ResourcesLoader still references it. Detach the loader from Resources first,
+            // then release the provider from the loader, and only then close the provider.
             resources.removeLoaders(loader);
+            loader.clearProviders();
             provider.close();
         }
 
