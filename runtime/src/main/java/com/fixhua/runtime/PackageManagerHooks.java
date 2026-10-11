@@ -6,35 +6,6 @@ import android.content.pm.PackageManager;
 
 /** Entry points used by transformed foreign bytecode. */
 public final class PackageManagerHooks {
-    interface QueryBackend {
-        SyntheticPackageManagerView.QueryResult query(String packageName) throws Exception;
-    }
-
-    static final class Scope implements AutoCloseable {
-        private final QueryBackend previous;
-        private boolean closed;
-
-        private Scope(QueryBackend backend) {
-            previous = ACTIVE.get();
-            ACTIVE.set(backend);
-        }
-
-        @Override
-        public void close() {
-            if (closed) return;
-            closed = true;
-            if (previous == null) ACTIVE.remove();
-            else ACTIVE.set(previous);
-        }
-    }
-
-    private static final ThreadLocal<QueryBackend> ACTIVE = new ThreadLocal<>();
-
-    static Scope install(QueryBackend backend) {
-        if (backend == null) throw new IllegalArgumentException("backend");
-        return new Scope(backend);
-    }
-
     /**
      * Synthetic replacement for PackageManager#getPackageInfo(String,int).
      * The host PackageManager argument is intentionally not consulted: transformed code must see
@@ -44,12 +15,9 @@ public final class PackageManagerHooks {
             PackageManager ignoredHostPackageManager,
             String packageName,
             int flags) throws PackageManager.NameNotFoundException {
-        QueryBackend backend = ACTIVE.get();
-        if (backend == null) {
-            throw new SecurityException("Synthetic package environment is not active");
-        }
+        SyntheticExecutionScope.Environment environment = SyntheticExecutionScope.require();
         try {
-            SyntheticPackageManagerView.QueryResult result = backend.query(packageName);
+            SyntheticPackageManagerView.QueryResult result = environment.packageQuery().query(packageName);
             if (!result.found() || result.projection() == null) {
                 throw new PackageManager.NameNotFoundException(packageName);
             }
