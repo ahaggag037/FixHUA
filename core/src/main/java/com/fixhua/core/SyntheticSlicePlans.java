@@ -15,13 +15,14 @@ import java.util.Set;
 public final class SyntheticSlicePlans {
     public static final int CAPABILITY_READ_IMPORTED_ARTIFACT = 1001;
     public static final int CAPABILITY_HOST_GBOX_PACKAGE_FACT = 1002;
+    public static final int CAPABILITY_HOST_CONNECTIVITY_SERVICE = 1003;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_IDENTITY = 1101;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_QUERY = 1102;
     public static final int CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY = 1103;
     public static final int CAPABILITY_SAFE_STUB_PERMISSION = 1104;
     public static final int CAPABILITY_SYNTHETIC_SLICE_V1 = 1200;
     public static final String RECIPE_ID = "sample.synthetic.v1";
-    public static final int RECIPE_VERSION = 6;
+    public static final int RECIPE_VERSION = 7;
 
     private static CoreModels.ProviderDescriptor artifactProvider() {
         return new CoreModels.ProviderDescriptor(
@@ -46,6 +47,21 @@ public final class SyntheticSlicePlans {
                 Set.of(CAPABILITY_HOST_GBOX_PACKAGE_FACT),
                 Set.of(),
                 Set.of(HOST_REAL),
+                EXACT,
+                SESSION,
+                false,
+                0,
+                0);
+    }
+
+    private static CoreModels.ProviderDescriptor hostConnectivityProvider() {
+        return new CoreModels.ProviderDescriptor(
+                "runtime.host-connectivity-service-v1",
+                "1",
+                P0_PUBLIC,
+                Set.of(CAPABILITY_HOST_CONNECTIVITY_SERVICE),
+                Set.of(),
+                Set.of(HOST_DELEGATED),
                 EXACT,
                 SESSION,
                 false,
@@ -119,7 +135,10 @@ public final class SyntheticSlicePlans {
                 "1",
                 P5_SYNTHETIC,
                 Set.of(CAPABILITY_SYNTHETIC_SLICE_V1),
-                Set.of(CAPABILITY_HOST_GBOX_PACKAGE_FACT, CAPABILITY_SAFE_STUB_PERMISSION),
+                Set.of(
+                        CAPABILITY_HOST_GBOX_PACKAGE_FACT,
+                        CAPABILITY_HOST_CONNECTIVITY_SERVICE,
+                        CAPABILITY_SAFE_STUB_PERMISSION),
                 Set.of(SYNTHETIC_VIEW),
                 EXACT,
                 SESSION,
@@ -150,6 +169,7 @@ public final class SyntheticSlicePlans {
                 List.of(
                         artifactProvider(),
                         hostGboxFactProvider(),
+                        hostConnectivityProvider(),
                         packageIdentityProvider(),
                         packageQueryProvider(),
                         contextIdentityProvider(),
