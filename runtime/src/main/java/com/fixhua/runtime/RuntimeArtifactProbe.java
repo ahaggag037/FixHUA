@@ -27,7 +27,9 @@ final class RuntimeArtifactProbe {
             int hostRedirectCallsites,
             String codeMarker,
             String appViewMarker,
-            String resourceMarker) {
+            String resourceMarker,
+            String screenCreateMarker,
+            ForeignScreenSession screenSession) {
         int rewrittenCallsites() {
             return packageManagerCallsites
                     + contextIdentityCallsites
@@ -87,6 +89,10 @@ final class RuntimeArtifactProbe {
                 null,
                 context.getClassLoader());
 
+        SyntheticExecutionScope.PackageQueryBackend packageQuery = packageName ->
+                SyntheticPackageManagerView.query(
+                        broker, sessionId, artifactSha256, planDigest, packageName);
+
         Class<?> entry = classLoader.loadClass(SAMPLE_ENTRY);
         Method pureMarker = entry.getMethod("pureMarker");
         String codeMarker = (String) pureMarker.invoke(null);
@@ -94,9 +100,7 @@ final class RuntimeArtifactProbe {
         Method run = entry.getMethod("run", Context.class);
         String appViewMarker;
         try (SyntheticExecutionScope.Scope ignored = SyntheticExecutionScope.install(
-                syntheticPackageName,
-                packageName -> SyntheticPackageManagerView.query(
-                        broker, sessionId, artifactSha256, planDigest, packageName))) {
+                syntheticPackageName, packageQuery)) {
             appViewMarker = (String) run.invoke(null, context);
         }
 
@@ -123,6 +127,10 @@ final class RuntimeArtifactProbe {
             provider.close();
         }
 
+        ForeignScreenSession screenSession = ForeignScreenSession.load(
+                classLoader, syntheticPackageName, packageQuery);
+        String screenCreateMarker = screenSession.onCreate(context);
+
         return new Result(
                 transformed.sourceSha256(),
                 transformed.imageSha256(),
@@ -132,7 +140,9 @@ final class RuntimeArtifactProbe {
                 transformed.hostRedirectCallsites(),
                 codeMarker,
                 appViewMarker,
-                resourceMarker);
+                resourceMarker,
+                screenCreateMarker,
+                screenSession);
     }
 
     private RuntimeArtifactProbe() {}
