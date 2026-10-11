@@ -4,6 +4,10 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 
 public final class ProbeEntry {
+    public static String pureMarker() {
+        return "sample-code-v1";
+    }
+
     public static String run(Context context) {
         String gms;
         try {
