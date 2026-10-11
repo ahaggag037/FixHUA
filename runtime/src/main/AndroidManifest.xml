@@ -9,6 +9,7 @@
     </queries>
 
     <application
+        android:name=".RuntimeApp"
         android:allowBackup="false"
         android:label="FixHUA Runtime"
         android:supportsRtl="true"
