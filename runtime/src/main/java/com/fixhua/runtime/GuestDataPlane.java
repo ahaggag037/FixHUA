@@ -7,13 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
 
-/**
- * Runtime-private persistent data root for one synthetic package identity.
- *
- * <p>The root is keyed by package name + signing certificate digest, not package name alone, so a
- * different signer cannot inherit an earlier guest's state merely by reusing its package name.
- * Nothing in this class escapes the Runtime application's private sandbox.</p>
- */
+/** Runtime-private persistent data root for one synthetic package identity. */
 final class GuestDataPlane {
     private static final String STORE_VERSION = "guest-data-v1";
 
@@ -59,66 +53,36 @@ final class GuestDataPlane {
         File root = confinedChild(store, identity);
         ensureDirectory(root);
 
-        File files = directory(root, "files");
-        File cache = directory(root, "cache");
-        File codeCache = directory(root, "code_cache");
-        File noBackup = directory(root, "no_backup");
-        File databases = directory(root, "databases");
-
         return new GuestDataPlane(
                 packageName,
                 signer,
                 identity,
                 root,
-                files,
-                cache,
-                codeCache,
-                noBackup,
-                databases);
+                directory(root, "files"),
+                directory(root, "cache"),
+                directory(root, "code_cache"),
+                directory(root, "no_backup"),
+                directory(root, "databases"));
     }
 
-    String packageName() {
-        return packageName;
-    }
-
-    String signerSha256() {
-        return signerSha256;
-    }
-
-    String identityDigest() {
-        return identityDigest;
-    }
-
-    File root() {
-        return root;
-    }
-
-    File filesDir() {
-        return files;
-    }
-
-    File cacheDir() {
-        return cache;
-    }
-
-    File codeCacheDir() {
-        return codeCache;
-    }
-
-    File noBackupFilesDir() {
-        return noBackup;
-    }
-
-    File databasePath(String name) {
-        return confinedLeaf(databases, name);
-    }
-
-    File filePath(String name) {
-        return confinedLeaf(files, name);
-    }
+    String packageName() { return packageName; }
+    String signerSha256() { return signerSha256; }
+    String identityDigest() { return identityDigest; }
+    File root() { return root; }
+    File filesDir() { return files; }
+    File cacheDir() { return cache; }
+    File codeCacheDir() { return codeCache; }
+    File noBackupFilesDir() { return noBackup; }
+    File databasePath(String name) { return confinedLeaf(databases, name); }
+    File filePath(String name) { return confinedLeaf(files, name); }
 
     String[] fileList() {
         String[] names = files.list();
+        return names == null ? new String[0] : names;
+    }
+
+    String[] databaseList() {
+        String[] names = databases.list();
         return names == null ? new String[0] : names;
     }
 
