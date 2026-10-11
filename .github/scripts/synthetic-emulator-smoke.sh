@@ -66,10 +66,10 @@ fi
 echo "PLAN_AUTHORIZED_HOST_CAPABILITY_PASS"
 endstep
 
-step "Verify DEX callsites drive foreign package and PackageManager perception"
+step "Verify DEX callsites drive foreign package, PackageManager and permission perception"
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1' dist/runtime-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=3.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1' dist/runtime-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;' dist/runtime-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true.*sourceReadOnly=true' dist/runtime-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-logcat.txt; then
   echo "Transformed session artifact verification failed" >&2
@@ -79,10 +79,10 @@ source_sha="$(grep -m1 'FixHUARuntime.*sessionArtifact=true' dist/runtime-logcat
   | sed -n 's/.*sourceSha256=\([0-9a-f][0-9a-f]*\).*/\1/p')"
 [[ ${#source_sha} -eq 64 ]]
 printf '%s\n' "$source_sha" > dist/session-source-sha256.txt
-echo "SYNTHETIC_CONTEXT_IDENTITY_PASS"
+echo "SYNTHETIC_CONTEXT_AND_PERMISSION_VIEW_PASS"
 endstep
 
-step "Verify lifecycle recreation preserves synthetic and host truths"
+step "Verify lifecycle recreation preserves synthetic, safe-stub and host truths"
 adb logcat -c
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
@@ -95,7 +95,7 @@ grep -q 'FixHUARuntimeLifecycle.*applicationConfigChanged=true' dist/runtime-lif
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-lifecycle-logcat.txt
 grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-lifecycle-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-lifecycle-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=3.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;' dist/runtime-lifecycle-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-lifecycle-logcat.txt; then
   echo "Transformed session did not survive recreation" >&2
   false
@@ -128,12 +128,12 @@ adb logcat -d -v brief > dist/runtime-recovery-logcat.txt
 cat dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=5' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUARuntime.*activeSession=true package=com.fixhua.sampletarget recipe=sample.synthetic.v1:5' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*activeSession=true package=com.fixhua.sampletarget recipe=sample.synthetic.v1:6' dist/runtime-recovery-logcat.txt
 grep -q "FixHUARuntime.*activeSession=true.*sha256=$source_sha" dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*sessionArtifact=true code=sample-code-v1 resource=sample-resource-v1' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=2.*pmCallsites=1.*contextCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*sessionArtifact=true.*transformCallsites=3.*pmCallsites=1.*contextCallsites=1.*safeStubCallsites=1.*appView=package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;' dist/runtime-recovery-logcat.txt
 grep -q "FixHUARuntime.*sessionArtifact=true.*sourceSha256=$source_sha" dist/runtime-recovery-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-recovery-logcat.txt; then
   echo "Recovered Runtime failed to rebuild the active session" >&2
