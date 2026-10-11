@@ -108,6 +108,27 @@ final class RuntimeSessionStore {
         return session;
     }
 
+    synchronized Session requireCapability(
+            String sessionId,
+            String artifactSha256,
+            String planDigest,
+            int capabilityId) throws Exception {
+        Session session = requireActive(sessionId, artifactSha256, planDigest);
+        CoreModels.ResolutionPlan expectedPlan = SyntheticSlicePlans.runtimeSessionPlan();
+        boolean authorized = false;
+        for (CoreModels.ResolutionStep step : expectedPlan.steps()) {
+            if (step.capabilityId() == capabilityId) {
+                authorized = true;
+                break;
+            }
+        }
+        if (!authorized) {
+            throw new SecurityException(
+                    "Capability not authorized by Runtime plan: " + capabilityId);
+        }
+        return session;
+    }
+
     synchronized File requireArtifactFile(
             String sessionId,
             String artifactSha256,
