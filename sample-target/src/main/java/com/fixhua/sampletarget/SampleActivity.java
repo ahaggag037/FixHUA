@@ -18,7 +18,12 @@ public final class SampleActivity extends Activity {
         super.onCreate(savedInstanceState);
         String baseline = ProbeEntry.run(this);
         Context appContext = getApplicationContext();
-        String appContextPackage = appContext == null ? "null" : appContext.getPackageName();
+        // Reuse the already-authorized ProbeEntry callsites instead of adding a second
+        // direct Context.getPackageName() target. This still proves the imported
+        // Application context sees the same synthetic package identity while keeping
+        // the transform surface explicit and cardinality-stable.
+        String appContextView = appContext == null ? "null" : ProbeEntry.run(appContext);
+        String appContextPackage = markerValue(appContextView, "package");
         String appContextClass = appContext == null ? "null" : appContext.getClass().getName();
         Log.i(TAG, "hostBaseline=true " + baseline
                 + ";appContextPackage=" + appContextPackage
@@ -30,6 +35,15 @@ public final class SampleActivity extends Activity {
                 + " / " + appContextClass);
         setContentView(text);
         verifyControllerBridgeIsDenied();
+    }
+
+    private static String markerValue(String marker, String key) {
+        if (marker == null || key == null || key.isEmpty()) return "null";
+        String prefix = key + "=";
+        for (String part : marker.split(";")) {
+            if (part.startsWith(prefix)) return part.substring(prefix.length());
+        }
+        return "missing";
     }
 
     private void verifyControllerBridgeIsDenied() {
