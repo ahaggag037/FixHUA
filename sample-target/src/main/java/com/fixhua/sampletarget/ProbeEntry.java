@@ -4,6 +4,9 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 
 public final class ProbeEntry {
+    private static final String RUNTIME_BRIDGE_PERMISSION =
+            "com.fixhua.guard.permission.RUNTIME_BRIDGE";
+
     public static String pureMarker() {
         return "sample-code-v1";
     }
@@ -16,8 +19,11 @@ public final class ProbeEntry {
         } catch (PackageManager.NameNotFoundException e) {
             gms = "absent";
         }
+        String bridgePermission = context.checkSelfPermission(RUNTIME_BRIDGE_PERMISSION)
+                == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
         return "package=" + context.getPackageName()
                 + ";gms=" + gms
+                + ";bridgePerm=" + bridgePermission
                 + ";context=" + context.getClass().getName();
     }
 
