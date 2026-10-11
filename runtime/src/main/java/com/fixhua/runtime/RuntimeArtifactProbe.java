@@ -24,11 +24,15 @@ final class RuntimeArtifactProbe {
             int packageManagerCallsites,
             int contextIdentityCallsites,
             int safeStubCallsites,
+            int hostRedirectCallsites,
             String codeMarker,
             String appViewMarker,
             String resourceMarker) {
         int rewrittenCallsites() {
-            return packageManagerCallsites + contextIdentityCallsites + safeStubCallsites;
+            return packageManagerCallsites
+                    + contextIdentityCallsites
+                    + safeStubCallsites
+                    + hostRedirectCallsites;
         }
     }
 
@@ -58,13 +62,16 @@ final class RuntimeArtifactProbe {
             throw new SecurityException("Transform source differs from Controller-approved artifact");
         }
         if (transformed.packageManagerCallsites() != 1) {
-            throw new SecurityException("Slice V3 requires exactly one PackageManager callsite");
+            throw new SecurityException("Slice V4 requires exactly one PackageManager callsite");
         }
         if (transformed.contextIdentityCallsites() != 1) {
-            throw new SecurityException("Slice V3 requires exactly one Context identity callsite");
+            throw new SecurityException("Slice V4 requires exactly one Context identity callsite");
         }
         if (transformed.safeStubCallsites() != 1) {
-            throw new SecurityException("Slice V3 requires exactly one permission SAFE_STUB callsite");
+            throw new SecurityException("Slice V4 requires exactly one permission SAFE_STUB callsite");
+        }
+        if (transformed.hostRedirectCallsites() != 1) {
+            throw new SecurityException("Slice V4 requires exactly one typed host-service redirect callsite");
         }
 
         File apk = transformed.image();
@@ -122,6 +129,7 @@ final class RuntimeArtifactProbe {
                 transformed.packageManagerCallsites(),
                 transformed.contextIdentityCallsites(),
                 transformed.safeStubCallsites(),
+                transformed.hostRedirectCallsites(),
                 codeMarker,
                 appViewMarker,
                 resourceMarker);
