@@ -16,9 +16,11 @@ public final class SampleActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        String baseline = ProbeEntry.run(this);
+        Log.i(TAG, "hostBaseline=true " + baseline);
         TextView text = new TextView(this);
         text.setPadding(32, 48, 32, 32);
-        text.setText("FixHUA Sample Target\nHost baseline:\n" + ProbeEntry.run(this));
+        text.setText("FixHUA Sample Target\nHost baseline:\n" + baseline);
         setContentView(text);
         verifyControllerBridgeIsDenied();
     }
@@ -35,11 +37,8 @@ public final class SampleActivity extends Activity {
                 }
                 @Override public void onServiceDisconnected(ComponentName name) {}
             }, Context.BIND_AUTO_CREATE);
-            if (!bound) {
-                Log.i(TAG, "bridgeDenied=true reason=bindService_false");
-            } else {
-                Log.e(TAG, "SECURITY_FAILURE: bindService returned true for untrusted sample");
-            }
+            if (!bound) Log.i(TAG, "bridgeDenied=true reason=bindService_false");
+            else Log.e(TAG, "SECURITY_FAILURE: bindService returned true for untrusted sample");
         } catch (SecurityException expected) {
             Log.i(TAG, "bridgeDenied=true reason=SecurityException");
         }
