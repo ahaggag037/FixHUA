@@ -3,17 +3,25 @@ package com.fixhua.guard;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.fixhua.core.BugreportAnalyzer;
+import com.fixhua.core.HostDoctor;
+
+import java.io.InputStream;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class MainActivity extends Activity {
+    private static final int REQUEST_BUGREPORT_ZIP = 4101;
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicInteger refreshGeneration = new AtomicInteger();
 
@@ -40,6 +48,7 @@ public final class MainActivity extends Activity {
         findViewById(R.id.huaweiSettings).setOnClickListener(v -> SettingsNavigator.openHuaweiAppLaunch(this));
         findViewById(R.id.batterySettings).setOnClickListener(v -> SettingsNavigator.openBatteryOptimizationSettings(this));
         findViewById(R.id.gboxInfo).setOnClickListener(v -> SettingsNavigator.openAppDetails(this, SystemSnapshot.GBOX));
+        findViewById(R.id.importBugreport).setOnClickListener(v -> openBugreportPicker());
         findViewById(R.id.shareReport).setOnClickListener(v -> shareFreshReport());
 
         refresh(false);
@@ -56,6 +65,18 @@ public final class MainActivity extends Activity {
         refreshGeneration.incrementAndGet();
         executor.shutdownNow();
         super.onDestroy();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_BUGREPORT_ZIP || resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri == null) {
+            Toast.makeText(this, "لم يتم اختيار ملف Bug Report", Toast.LENGTH_LONG).show();
+            return;
+        }
+        analyzeBugreport(uri);
     }
 
     private void refresh(boolean userRequested) {
@@ -120,6 +141,93 @@ public final class MainActivity extends Activity {
         ReadinessEngine.Finding actionable = result.firstActionable();
         fixNextButton.setEnabled(actionable != null);
         fixNextButton.setText(actionable == null ? "لا توجد مشكلة تحتاج إجراء" : "إصلاح أهم مشكلة");
+    }
+
+    private void openBugreportPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/zip");
+        try {
+            startActivityForResult(intent, REQUEST_BUGREPORT_ZIP);
+        } catch (RuntimeException e) {
+            intent.setType("*/*");
+            startActivityForResult(intent, REQUEST_BUGREPORT_ZIP);
+        }
+    }
+
+    private void analyzeBugreport(Uri uri) {
+        findingsView.setText("جاري تحليل Full Bug Report محليًا…\nلن يتم رفع الملف أو الاحتفاظ بالسجلات الخام.");
+        executor.execute(() -> {
+            try (InputStream input = getContentResolver().openInputStream(uri)) {
+                if (input == null) throw new IllegalStateException("تعذر فتح الملف المحدد");
+                BugreportAnalyzer.Result report = new BugreportAnalyzer().analyzeZip(input);
+                HostDoctor doctor = new HostDoctor();
+                int observedProcesses = Math.max(1, report.gboxProcessNames().size());
+                List<HostDoctor.Finding> hostFindings = doctor.evaluate(
+                        report.toHostProfile(),
+                        new HostDoctor.RuntimeBudget("observed-gbox", observedProcesses));
+                String text = formatBugreportResult(report, hostFindings);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    findingsView.setText(text);
+                    new AlertDialog.Builder(this)
+                            .setTitle("تحليل Bug Report اكتمل")
+                            .setMessage("تم استخراج حقائق التوافق محليًا فقط. لم يتم رفع الملف ولم يحتفظ FixHUA بالسجلات الخام.")
+                            .setPositiveButton("حسنًا", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    findingsView.setText("تعذر تحليل Bug Report:\n" + e.getClass().getSimpleName()
+                            + ": " + String.valueOf(e.getMessage()));
+                });
+            }
+        });
+    }
+
+    private static String formatBugreportResult(
+            BugreportAnalyzer.Result report,
+            List<HostDoctor.Finding> hostFindings) {
+        StringBuilder text = new StringBuilder();
+        text.append("نتائج Full Bug Report:\n\n");
+
+        if (report.currentMaxCachedProcesses() > 0) {
+            text.append("• حد العمليات الفعلي: ").append(report.currentMaxCachedProcesses()).append('\n');
+        }
+        if (report.customizedMaxCachedProcesses() > 0) {
+            text.append("• حد الجهاز/OEM المرجعي: ")
+                    .append(report.customizedMaxCachedProcesses()).append('\n');
+        }
+        text.append("• عمليات GBox المرصودة: ").append(report.gboxProcessNames().size()).append('\n');
+        text.append("• مؤشرات AppProcessKiller: ").append(report.gboxAppProcessKillerMarkers()).append('\n');
+        text.append("• مؤشرات null Application/Resources: ")
+                .append(report.nullApplicationResourcesMarkers()).append('\n');
+        text.append("• Input-dispatch timeout markers: ")
+                .append(report.inputDispatchTimeoutMarkers()).append('\n');
+        text.append("• Force 4x MSAA: ").append(report.force4xMsaa() ? "مفعل" : "غير ظاهر كمفعل").append('\n');
+        text.append("• Don't keep activities: ")
+                .append(report.alwaysFinishActivities() ? "مفعل" : "غير ظاهر كمفعل").append('\n');
+        if (!report.webViewPackage().isBlank()) {
+            text.append("• WebView: ").append(report.webViewPackage());
+            if (!report.webViewVersion().isBlank()) text.append(' ').append(report.webViewVersion());
+            text.append('\n');
+        }
+
+        if (!hostFindings.isEmpty()) {
+            text.append("\nHost Doctor:\n");
+            for (HostDoctor.Finding finding : hostFindings) {
+                String marker = finding.severity() == HostDoctor.Severity.HIGH ? "⛔"
+                        : finding.severity() == HostDoctor.Severity.WARNING ? "⚠" : "ℹ";
+                text.append(marker).append(' ').append(finding.summary()).append('\n');
+                text.append("  ↳ ").append(finding.recommendedAction()).append('\n');
+            }
+        }
+
+        text.append("\nتم تحليل ")
+                .append(String.format(Locale.US, "%.1f MB", report.scannedBytes() / (1024.0 * 1024.0)))
+                .append(" من النص الرئيسي دون استخراج ZIP إلى التخزين.");
+        return text.toString();
     }
 
     private void fixMostImportant() {
