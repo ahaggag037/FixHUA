@@ -8,19 +8,18 @@ import com.fixhua.core.CoreModels;
 import com.fixhua.core.ExecutionEvidence;
 import com.fixhua.core.SyntheticSlicePlans;
 
-/**
- * Runtime-owned facade superclass for an imported ordinary Application. The object is not installed
- * into ActivityThread; FixHUA supplies a restricted base Context and explicitly dispatches the
- * bounded lifecycle needed by the managed target.
- */
+/** Runtime-owned facade superclass for an imported ordinary Application. */
 public class SyntheticApplicationFacade extends Application {
     private boolean attached;
     private boolean created;
+    private GuestDataPlane dataPlane;
 
-    public final void fixhuaAttachHost(Context host) {
+    public final void fixhuaAttachHost(Context host, GuestDataPlane guestDataPlane) {
         if (host == null) throw new IllegalArgumentException("host");
+        if (guestDataPlane == null) throw new IllegalArgumentException("guestDataPlane");
         if (attached) throw new IllegalStateException("Application facade already attached");
-        super.attachBaseContext(new SyntheticRestrictedContext(host, this));
+        dataPlane = guestDataPlane;
+        super.attachBaseContext(new SyntheticRestrictedContext(host, this, guestDataPlane));
         attached = true;
         emit("attach", "READY");
     }
@@ -38,18 +37,17 @@ public class SyntheticApplicationFacade extends Application {
         return this;
     }
 
-    /**
-     * Super target for transformed `invoke-super Application.onCreate` calls. The real Runtime
-     * Application owns framework process lifecycle, so this imported facade must not enter it.
-     */
     @Override
     @SuppressLint("MissingSuperCall")
     public void onCreate() {
-        // Intentionally empty. Imported subclass code runs around this no-op super target.
+        // RuntimeApp owns the real process lifecycle. Imported subclass code runs around this no-op.
     }
 
-    public final boolean fixhuaIsCreated() {
-        return created;
+    public final boolean fixhuaIsCreated() { return created; }
+
+    final GuestDataPlane fixhuaDataPlane() {
+        if (dataPlane == null) throw new IllegalStateException("Application data plane not attached");
+        return dataPlane;
     }
 
     private static void emit(String phase, String outcome) {
