@@ -40,50 +40,22 @@ final class SyntheticRestrictedContext extends ContextWrapper {
         this.dataPlane = dataPlane;
     }
 
-    @Override
-    public String getPackageName() {
-        return ContextHooks.getPackageName(this);
-    }
-
-    @Override
-    public Context getApplicationContext() {
+    @Override public String getPackageName() { return ContextHooks.getPackageName(this); }
+    @Override public Context getApplicationContext() {
         return syntheticApplicationContext != null ? syntheticApplicationContext : this;
     }
-
-    @Override
-    public int checkSelfPermission(String permission) {
+    @Override public int checkSelfPermission(String permission) {
         return ContextHooks.checkSelfPermission(this, permission);
     }
-
-    @Override
-    public Object getSystemService(String name) {
+    @Override public Object getSystemService(String name) {
         return ContextHooks.getSystemService(getBaseContext(), name);
     }
 
-    @Override
-    public File getDataDir() {
-        return requireDataPlane().root();
-    }
-
-    @Override
-    public File getFilesDir() {
-        return requireDataPlane().filesDir();
-    }
-
-    @Override
-    public File getCacheDir() {
-        return requireDataPlane().cacheDir();
-    }
-
-    @Override
-    public File getCodeCacheDir() {
-        return requireDataPlane().codeCacheDir();
-    }
-
-    @Override
-    public File getNoBackupFilesDir() {
-        return requireDataPlane().noBackupFilesDir();
-    }
+    @Override public File getDataDir() { return requireDataPlane().root(); }
+    @Override public File getFilesDir() { return requireDataPlane().filesDir(); }
+    @Override public File getCacheDir() { return requireDataPlane().cacheDir(); }
+    @Override public File getCodeCacheDir() { return requireDataPlane().codeCacheDir(); }
+    @Override public File getNoBackupFilesDir() { return requireDataPlane().noBackupFilesDir(); }
 
     @Override
     public FileInputStream openFileInput(String name) throws FileNotFoundException {
@@ -104,10 +76,7 @@ final class SyntheticRestrictedContext extends ContextWrapper {
         return !target.exists() || target.delete();
     }
 
-    @Override
-    public String[] fileList() {
-        return requireDataPlane().fileList();
-    }
+    @Override public String[] fileList() { return requireDataPlane().fileList(); }
 
     @Override
     public SharedPreferences getSharedPreferences(String name, int mode) {
@@ -117,14 +86,11 @@ final class SyntheticRestrictedContext extends ContextWrapper {
                 || name.contains("/") || name.contains("\\")) {
             throw new SecurityException("Malformed guest preferences name");
         }
-        // Logical guest namespace on the Runtime's private Context backend. The identity digest keeps
-        // different package/signing identities isolated even when the package name is reused.
         return getBaseContext().getSharedPreferences(
                 "fixhua_guest_" + plane.identityDigest() + "_" + name, MODE_PRIVATE);
     }
 
-    @Override
-    public File getDatabasePath(String name) {
+    @Override public File getDatabasePath(String name) {
         return requireDataPlane().databasePath(name);
     }
 
@@ -143,7 +109,7 @@ final class SyntheticRestrictedContext extends ContextWrapper {
             DatabaseErrorHandler errorHandler) {
         if (mode != MODE_PRIVATE) throw new SecurityException("Unsupported guest database mode");
         return SQLiteDatabase.openDatabase(
-                requireDataPlane().databasePath(name),
+                requireDataPlane().databasePath(name).getAbsolutePath(),
                 factory,
                 SQLiteDatabase.CREATE_IF_NECESSARY,
                 errorHandler);
@@ -155,10 +121,7 @@ final class SyntheticRestrictedContext extends ContextWrapper {
         return !file.exists() || SQLiteDatabase.deleteDatabase(file);
     }
 
-    @Override
-    public String[] databaseList() {
-        return requireDataPlane().databaseList();
-    }
+    @Override public String[] databaseList() { return requireDataPlane().databaseList(); }
 
     @Override
     public ApplicationInfo getApplicationInfo() {
@@ -179,10 +142,7 @@ final class SyntheticRestrictedContext extends ContextWrapper {
 
     @Override
     public boolean bindService(
-            Intent service,
-            int flags,
-            java.util.concurrent.Executor executor,
-            ServiceConnection conn) {
+            Intent service, int flags, java.util.concurrent.Executor executor, ServiceConnection conn) {
         emitBlockedBinding(service);
         return false;
     }
@@ -198,13 +158,10 @@ final class SyntheticRestrictedContext extends ContextWrapper {
         return false;
     }
 
-    @Override
-    public ComponentName startService(Intent service) {
+    @Override public ComponentName startService(Intent service) {
         throw new SecurityException("Imported code cannot start arbitrary host services");
     }
-
-    @Override
-    public ComponentName startForegroundService(Intent service) {
+    @Override public ComponentName startForegroundService(Intent service) {
         throw new SecurityException("Imported code cannot start arbitrary host foreground services");
     }
 
