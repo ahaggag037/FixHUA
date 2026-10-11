@@ -40,10 +40,10 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * Creates a private derived execution APK while preserving the imported source artifact unchanged.
- * Slice V2 rewrites only explicitly declared compatibility callsites.
+ * Slice V3 rewrites only explicitly declared compatibility callsites.
  */
 final class DexCallsiteTransformer {
-    private static final String TRANSFORM_ID = "pm-context-v2";
+    private static final String TRANSFORM_ID = "pm-context-permission-v3";
 
     private static final String PM_SOURCE_CLASS = "Landroid/content/pm/PackageManager;";
     private static final String PM_SOURCE_METHOD = "getPackageInfo";
@@ -56,34 +56,44 @@ final class DexCallsiteTransformer {
             PM_SOURCE_RETURN);
 
     private static final String CONTEXT_SOURCE_CLASS = "Landroid/content/Context;";
-    private static final String CONTEXT_SOURCE_METHOD = "getPackageName";
-    private static final String CONTEXT_SOURCE_RETURN = "Ljava/lang/String;";
-    private static final ImmutableMethodReference CONTEXT_HOOK_REFERENCE = new ImmutableMethodReference(
-            "Lcom/fixhua/runtime/ContextHooks;",
-            CONTEXT_SOURCE_METHOD,
-            List.of("Landroid/content/Context;"),
-            CONTEXT_SOURCE_RETURN);
+    private static final String CONTEXT_IDENTITY_METHOD = "getPackageName";
+    private static final String CONTEXT_IDENTITY_RETURN = "Ljava/lang/String;";
+    private static final ImmutableMethodReference CONTEXT_IDENTITY_HOOK_REFERENCE =
+            new ImmutableMethodReference(
+                    "Lcom/fixhua/runtime/ContextHooks;",
+                    CONTEXT_IDENTITY_METHOD,
+                    List.of("Landroid/content/Context;"),
+                    CONTEXT_IDENTITY_RETURN);
+
+    private static final String PERMISSION_METHOD = "checkSelfPermission";
+    private static final String PERMISSION_RETURN = "I";
+    private static final List<String> PERMISSION_PARAMS = List.of("Ljava/lang/String;");
+    private static final ImmutableMethodReference PERMISSION_HOOK_REFERENCE =
+            new ImmutableMethodReference(
+                    "Lcom/fixhua/runtime/ContextHooks;",
+                    PERMISSION_METHOD,
+                    List.of("Landroid/content/Context;", "Ljava/lang/String;"),
+                    PERMISSION_RETURN);
 
     record Result(
             File image,
             int packageManagerCallsites,
             int contextIdentityCallsites,
+            int safeStubCallsites,
             String sourceSha256,
             String imageSha256) {
         int rewrittenCallsites() {
-            return packageManagerCallsites + contextIdentityCallsites;
+            return packageManagerCallsites + contextIdentityCallsites + safeStubCallsites;
         }
     }
 
-    private record TargetCounts(int packageManager, int contextIdentity) {
-        int total() { return packageManager + contextIdentity; }
-    }
+    private record TargetCounts(int packageManager, int contextIdentity, int safeStub) {}
 
     static Result transform(Context context, File sourceApk) throws Exception {
         if (sourceApk == null || !sourceApk.isFile()) throw new IllegalStateException("Source APK missing");
         if (sourceApk.canWrite()) throw new SecurityException("Source APK must be immutable before transform");
         String sourceHash = sha256(sourceApk);
-        File directory = new File(context.getCodeCacheDir(), "transformed-images-v2");
+        File directory = new File(context.getCodeCacheDir(), "transformed-images-v3");
         if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("Cannot create transform directory");
         File output = new File(directory, sourceHash + "-" + TRANSFORM_ID + ".apk");
         File temp = new File(directory, output.getName() + ".tmp");
@@ -91,6 +101,7 @@ final class DexCallsiteTransformer {
 
         AtomicInteger packageManagerCallsites = new AtomicInteger();
         AtomicInteger contextIdentityCallsites = new AtomicInteger();
+        AtomicInteger safeStubCallsites = new AtomicInteger();
         try (ZipFile input = new ZipFile(sourceApk);
              ZipOutputStream zipOut = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))) {
             Enumeration<? extends ZipEntry> entries = input.entries();
@@ -116,7 +127,8 @@ final class DexCallsiteTransformer {
                             input.getInputStream(entry),
                             zipOut,
                             packageManagerCallsites,
-                            contextIdentityCallsites);
+                            contextIdentityCallsites,
+                            safeStubCallsites);
                 } else {
                     try (InputStream in = new BufferedInputStream(input.getInputStream(entry))) { copy(in, zipOut); }
                 }
@@ -127,7 +139,7 @@ final class DexCallsiteTransformer {
             throw failure;
         }
 
-        if (packageManagerCallsites.get() + contextIdentityCallsites.get() <= 0) {
+        if (packageManagerCallsites.get() + contextIdentityCallsites.get() + safeStubCallsites.get() <= 0) {
             temp.delete();
             throw new SecurityException("No declared compatibility callsite was found");
         }
@@ -147,6 +159,7 @@ final class DexCallsiteTransformer {
                 output,
                 packageManagerCallsites.get(),
                 contextIdentityCallsites.get(),
+                safeStubCallsites.get(),
                 sourceHash,
                 sha256(output));
     }
@@ -155,7 +168,8 @@ final class DexCallsiteTransformer {
             InputStream raw,
             OutputStream destination,
             AtomicInteger packageManagerCallsites,
-            AtomicInteger contextIdentityCallsites) throws Exception {
+            AtomicInteger contextIdentityCallsites,
+            AtomicInteger safeStubCallsites) throws Exception {
         File tempDex = File.createTempFile("fixhua-rewritten-", ".dex");
         try {
             DexFile dex;
@@ -165,6 +179,7 @@ final class DexCallsiteTransformer {
             TargetCounts counts = countTargetCallsites(dex);
             packageManagerCallsites.addAndGet(counts.packageManager());
             contextIdentityCallsites.addAndGet(counts.contextIdentity());
+            safeStubCallsites.addAndGet(counts.safeStub());
 
             RewriterModule module = new RewriterModule() {
                 @Override public Rewriter<Instruction> getInstructionRewriter(Rewriters rewriters) {
@@ -188,6 +203,7 @@ final class DexCallsiteTransformer {
     private static TargetCounts countTargetCallsites(DexFile dex) {
         int packageManager = 0;
         int contextIdentity = 0;
+        int safeStub = 0;
         for (ClassDef classDef : dex.getClasses()) {
             for (Method method : classDef.getMethods()) {
                 MethodImplementation implementation = method.getImplementation();
@@ -197,10 +213,11 @@ final class DexCallsiteTransformer {
                     if (reference == null) continue;
                     if (isPackageManagerTarget(reference)) packageManager++;
                     else if (isContextIdentityTarget(reference)) contextIdentity++;
+                    else if (isPermissionSafeStubTarget(reference)) safeStub++;
                 }
             }
         }
-        return new TargetCounts(packageManager, contextIdentity);
+        return new TargetCounts(packageManager, contextIdentity, safeStub);
     }
 
     private static Instruction rewriteInstruction(Instruction instruction) {
@@ -250,7 +267,8 @@ final class DexCallsiteTransformer {
     private static ImmutableMethodReference hookFor(MethodReference method) {
         if (method == null) return null;
         if (isPackageManagerTarget(method)) return PM_HOOK_REFERENCE;
-        if (isContextIdentityTarget(method)) return CONTEXT_HOOK_REFERENCE;
+        if (isContextIdentityTarget(method)) return CONTEXT_IDENTITY_HOOK_REFERENCE;
+        if (isPermissionSafeStubTarget(method)) return PERMISSION_HOOK_REFERENCE;
         return null;
     }
 
@@ -263,9 +281,16 @@ final class DexCallsiteTransformer {
 
     private static boolean isContextIdentityTarget(MethodReference method) {
         return CONTEXT_SOURCE_CLASS.equals(method.getDefiningClass())
-                && CONTEXT_SOURCE_METHOD.equals(method.getName())
-                && CONTEXT_SOURCE_RETURN.equals(method.getReturnType())
+                && CONTEXT_IDENTITY_METHOD.equals(method.getName())
+                && CONTEXT_IDENTITY_RETURN.equals(method.getReturnType())
                 && method.getParameterTypes().isEmpty();
+    }
+
+    private static boolean isPermissionSafeStubTarget(MethodReference method) {
+        return CONTEXT_SOURCE_CLASS.equals(method.getDefiningClass())
+                && PERMISSION_METHOD.equals(method.getName())
+                && PERMISSION_RETURN.equals(method.getReturnType())
+                && parametersEqual(method.getParameterTypes(), PERMISSION_PARAMS);
     }
 
     private static boolean parametersEqual(
