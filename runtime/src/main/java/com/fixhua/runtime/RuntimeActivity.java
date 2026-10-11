@@ -34,6 +34,8 @@ public final class RuntimeActivity extends Activity {
 
     private TextView status;
     private boolean bound;
+    private boolean resumed;
+    private ForeignScreenSession foreignScreen;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -163,6 +165,14 @@ public final class RuntimeActivity extends Activity {
     protected void onResume() {
         super.onResume();
         RuntimeApp.assertReady("activityOnResume");
+        resumed = true;
+        dispatchForeignResume();
+    }
+
+    @Override
+    protected void onPause() {
+        resumed = false;
+        super.onPause();
     }
 
     @Override
@@ -171,6 +181,14 @@ public final class RuntimeActivity extends Activity {
         RuntimeApp.assertReady("activityConfigurationChanged");
         Log.i(TAG, "activityConfigChanged=true orientation=" + newConfig.orientation
                 + " configGeneration=" + RuntimeApp.configurationGeneration());
+        if (foreignScreen != null) {
+            try {
+                String marker = foreignScreen.onConfigurationChanged(newConfig.orientation);
+                Log.i(TAG, "foreignScreenLifecycle=true phase=onConfigurationChanged marker=" + marker);
+            } catch (Exception failure) {
+                Log.e(TAG, "foreignScreenLifecycle=false phase=onConfigurationChanged", failure);
+            }
+        }
     }
 
     private SessionArgs queryActiveSession(IBinder broker) throws Exception {
@@ -223,6 +241,12 @@ public final class RuntimeActivity extends Activity {
                 throw new SecurityException(
                         "Transformed app did not consume synthetic/safe-stub/host-delegated view");
             }
+            if (!result.screenCreateMarker().startsWith("create=1;resume=0;config=0;destroy=0")) {
+                throw new SecurityException("Imported screen did not receive delegated onCreate");
+            }
+
+            replaceForeignScreen(result.screenSession(), result.screenCreateMarker());
+
             Log.i(TAG, "sessionArtifact=true code=" + result.codeMarker()
                     + " resource=" + result.resourceMarker()
                     + " sourceSha256=" + result.sourceSha256()
@@ -238,6 +262,7 @@ public final class RuntimeActivity extends Activity {
             status.append("\nDEX callsite transform: " + result.rewrittenCallsites());
             status.append("\nPermission SAFE_STUB callsites: " + result.safeStubCallsites());
             status.append("\nHost service redirects: " + result.hostRedirectCallsites());
+            status.append("\nProxy lifecycle: imported onCreate delegated");
             status.append("\nSynthetic Context package: " + syntheticPackageName);
             status.append("\nForeign app view: " + result.appViewMarker());
             status.append("\nExternal APK code: " + result.codeMarker());
@@ -250,9 +275,39 @@ public final class RuntimeActivity extends Activity {
         }
     }
 
+    private void replaceForeignScreen(ForeignScreenSession next, String createMarker) throws Exception {
+        if (foreignScreen != null) {
+            String oldMarker = foreignScreen.onDestroy();
+            Log.i(TAG, "foreignScreenLifecycle=true phase=replaceDestroy marker=" + oldMarker);
+        }
+        foreignScreen = next;
+        Log.i(TAG, "foreignScreenLifecycle=true phase=onCreate marker=" + createMarker);
+        if (resumed) dispatchForeignResume();
+    }
+
+    private void dispatchForeignResume() {
+        if (foreignScreen == null) return;
+        try {
+            String marker = foreignScreen.onResume();
+            Log.i(TAG, "foreignScreenLifecycle=true phase=onResume marker=" + marker);
+        } catch (Exception failure) {
+            Log.e(TAG, "foreignScreenLifecycle=false phase=onResume", failure);
+        }
+    }
+
     @Override
     protected void onDestroy() {
         RuntimeApp.assertReady("activityOnDestroy");
+        if (foreignScreen != null) {
+            try {
+                String marker = foreignScreen.onDestroy();
+                Log.i(TAG, "foreignScreenLifecycle=true phase=onDestroy marker=" + marker);
+            } catch (Exception failure) {
+                Log.e(TAG, "foreignScreenLifecycle=false phase=onDestroy", failure);
+            } finally {
+                foreignScreen = null;
+            }
+        }
         if (bound) {
             try { unbindService(connection); } catch (IllegalArgumentException ignored) {}
             bound = false;
