@@ -21,10 +21,15 @@ final class RuntimeArtifactProbe {
     record Result(
             String sourceSha256,
             String transformedSha256,
-            int rewrittenCallsites,
+            int packageManagerCallsites,
+            int contextIdentityCallsites,
             String codeMarker,
             String appViewMarker,
-            String resourceMarker) {}
+            String resourceMarker) {
+        int rewrittenCallsites() {
+            return packageManagerCallsites + contextIdentityCallsites;
+        }
+    }
 
     static Result run(
             Context context,
@@ -32,7 +37,8 @@ final class RuntimeArtifactProbe {
             IBinder broker,
             String sessionId,
             String artifactSha256,
-            String planDigest) throws Exception {
+            String planDigest,
+            String syntheticPackageName) throws Exception {
         if (Build.VERSION.SDK_INT < 30) {
             throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
         }
@@ -42,13 +48,19 @@ final class RuntimeArtifactProbe {
         if (sourceApk.canWrite()) {
             throw new SecurityException("Runtime artifact must be read-only before transformation");
         }
+        if (syntheticPackageName == null || syntheticPackageName.isBlank()) {
+            throw new SecurityException("Synthetic package identity is missing");
+        }
 
         DexCallsiteTransformer.Result transformed = DexCallsiteTransformer.transform(context, sourceApk);
         if (!artifactSha256.equalsIgnoreCase(transformed.sourceSha256())) {
             throw new SecurityException("Transform source differs from Controller-approved artifact");
         }
-        if (transformed.rewrittenCallsites() != 1) {
-            throw new SecurityException("Slice V1 requires exactly one transformed callsite");
+        if (transformed.packageManagerCallsites() != 1) {
+            throw new SecurityException("Slice V2 requires exactly one PackageManager callsite");
+        }
+        if (transformed.contextIdentityCallsites() != 1) {
+            throw new SecurityException("Slice V2 requires exactly one Context identity callsite");
         }
 
         File apk = transformed.image();
@@ -70,7 +82,8 @@ final class RuntimeArtifactProbe {
 
         Method run = entry.getMethod("run", Context.class);
         String appViewMarker;
-        try (PackageManagerHooks.Scope ignored = PackageManagerHooks.install(
+        try (SyntheticExecutionScope.Scope ignored = SyntheticExecutionScope.install(
+                syntheticPackageName,
                 packageName -> SyntheticPackageManagerView.query(
                         broker, sessionId, artifactSha256, planDigest, packageName))) {
             appViewMarker = (String) run.invoke(null, context);
@@ -102,7 +115,8 @@ final class RuntimeArtifactProbe {
         return new Result(
                 transformed.sourceSha256(),
                 transformed.imageSha256(),
-                transformed.rewrittenCallsites(),
+                transformed.packageManagerCallsites(),
+                transformed.contextIdentityCallsites(),
                 codeMarker,
                 appViewMarker,
                 resourceMarker);
