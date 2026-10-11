@@ -25,17 +25,26 @@ final class RuntimeArtifactProbe {
     record Result(String artifactSha256, String codeMarker, String resourceMarker) {}
 
     static Result run(Context context) throws Exception {
-        if (Build.VERSION.SDK_INT < 30) {
-            throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
-        }
-
         PackageManager pm = context.getPackageManager();
         ApplicationInfo info = pm.getApplicationInfo(SAMPLE_PACKAGE, 0);
         File apk = new File(info.sourceDir);
         if (!apk.isFile()) throw new IllegalStateException("Sample APK source is missing");
+        return run(context, apk);
+    }
+
+    static Result run(Context context, File apk) throws Exception {
+        if (Build.VERSION.SDK_INT < 30) {
+            throw new UnsupportedOperationException("ResourcesLoader requires API 30+");
+        }
+        if (apk == null || !apk.isFile()) {
+            throw new IllegalStateException("Runtime artifact is missing");
+        }
+        if (apk.canWrite()) {
+            throw new SecurityException("Runtime artifact must be read-only before code loading");
+        }
 
         String hash = sha256(apk);
-        File optimized = new File(context.getCodeCacheDir(), "sample-target-loader");
+        File optimized = new File(context.getCodeCacheDir(), "sample-target-loader-" + hash.substring(0, 12));
         if (!optimized.exists() && !optimized.mkdirs()) {
             throw new IllegalStateException("Cannot create runtime code cache");
         }
@@ -68,9 +77,6 @@ final class RuntimeArtifactProbe {
         try {
             resourceMarker = resources.getString(markerResId);
         } finally {
-            // Ownership order matters on API 30+: a ResourcesProvider cannot be closed while
-            // any ResourcesLoader still references it. Detach the loader from Resources first,
-            // then release the provider from the loader, and only then close the provider.
             resources.removeLoaders(loader);
             loader.clearProviders();
             provider.close();
@@ -79,7 +85,7 @@ final class RuntimeArtifactProbe {
         return new Result(hash, codeMarker, resourceMarker);
     }
 
-    private static String sha256(File file) throws Exception {
+    static String sha256(File file) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] buffer = new byte[64 * 1024];
         try (FileInputStream input = new FileInputStream(file)) {
