@@ -2,6 +2,8 @@ package com.fixhua.runtime;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.Application;
+import android.content.Context;
 import android.content.res.Resources;
 import android.os.Bundle;
 import android.view.View;
@@ -17,12 +19,15 @@ import com.fixhua.core.SyntheticSlicePlans;
  */
 public class SyntheticActivityFacade extends Activity {
     private Activity hostActivity;
+    private Application syntheticApplication;
 
-    public final void fixhuaAttachHost(Activity host) {
+    public final void fixhuaAttachHost(Activity host, Application application) {
         if (host == null) throw new IllegalArgumentException("host");
+        if (application == null) throw new IllegalArgumentException("application");
         if (hostActivity != null) throw new IllegalStateException("Facade already attached");
         hostActivity = host;
-        super.attachBaseContext(new SyntheticRestrictedContext(host));
+        syntheticApplication = application;
+        super.attachBaseContext(new SyntheticRestrictedContext(host, application));
         emit("attach", "READY");
     }
 
@@ -42,6 +47,12 @@ public class SyntheticActivityFacade extends Activity {
         if (hostActivity == null) return;
         onDestroy();
         emit("onDestroy", "DELIVERED");
+    }
+
+    @Override
+    public Context getApplicationContext() {
+        if (syntheticApplication != null) return syntheticApplication;
+        return super.getApplicationContext();
     }
 
     /**
@@ -98,7 +109,7 @@ public class SyntheticActivityFacade extends Activity {
     private static void emit(String phase, String outcome) {
         ExecutionEvidenceEmitter.emit(
                 SyntheticSlicePlans.CAPABILITY_SYNTHETIC_SLICE_V1,
-                "runtime.activity-facade-v1",
+                "runtime.activity-facade-v2",
                 ExecutionEvidence.Decision.SHIM,
                 CoreModels.TruthScope.SYNTHETIC_VIEW,
                 "activity-facade:" + phase,
