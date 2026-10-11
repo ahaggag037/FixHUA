@@ -90,7 +90,7 @@ public final class RuntimeActivity extends Activity {
                 status.append("\nPackage view: imported package only");
                 status.append("\nTruth scope: " + selfView.truthScope());
 
-                runSessionArtifactProbe(service, session);
+                runSessionArtifactProbe(service, session, selfView.projection().packageName());
             } catch (Exception e) {
                 Log.e(TAG, "bridgeAuthenticated=false", e);
                 status.setText("Runtime UID: " + Process.myUid()
@@ -170,7 +170,10 @@ public final class RuntimeActivity extends Activity {
         }
     }
 
-    private void runSessionArtifactProbe(IBinder broker, SessionArgs session) {
+    private void runSessionArtifactProbe(
+            IBinder broker,
+            SessionArgs session,
+            String syntheticPackageName) {
         RuntimeApp.assertReady("sessionArtifactProbe");
         try {
             File sourceImage = RuntimeSessionArtifact.obtain(
@@ -181,22 +184,27 @@ public final class RuntimeActivity extends Activity {
                     broker,
                     session.sessionId(),
                     session.artifactSha256(),
-                    session.planDigest());
+                    session.planDigest(),
+                    syntheticPackageName);
             if (!session.artifactSha256().equalsIgnoreCase(result.sourceSha256())) {
                 throw new SecurityException("Loaded source artifact differs from active session");
             }
-            if (!result.appViewMarker().contains(";gms=absent;")) {
-                throw new SecurityException("Transformed app did not consume synthetic package view");
+            String expectedPrefix = "package=" + syntheticPackageName + ";gms=absent;";
+            if (!result.appViewMarker().startsWith(expectedPrefix)) {
+                throw new SecurityException("Transformed app did not consume synthetic context/package view");
             }
             Log.i(TAG, "sessionArtifact=true code=" + result.codeMarker()
                     + " resource=" + result.resourceMarker()
                     + " sourceSha256=" + result.sourceSha256()
                     + " transformedSha256=" + result.transformedSha256()
                     + " transformCallsites=" + result.rewrittenCallsites()
+                    + " pmCallsites=" + result.packageManagerCallsites()
+                    + " contextCallsites=" + result.contextIdentityCallsites()
                     + " appView=" + result.appViewMarker()
                     + " sourceReadOnly=" + !sourceImage.canWrite());
             status.append("\nSession source: verified");
             status.append("\nDEX callsite transform: " + result.rewrittenCallsites());
+            status.append("\nSynthetic Context package: " + syntheticPackageName);
             status.append("\nForeign app view: " + result.appViewMarker());
             status.append("\nExternal APK code: " + result.codeMarker());
             status.append("\nExternal APK resource: " + result.resourceMarker());
