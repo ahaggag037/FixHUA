@@ -2,10 +2,12 @@ package com.fixhua.runtime;
 
 import android.content.Context;
 
-import com.android.tools.smali.dexlib2.DexFileFactory;
 import com.android.tools.smali.dexlib2.Opcode;
 import com.android.tools.smali.dexlib2.Opcodes;
+import com.android.tools.smali.dexlib2.iface.ClassDef;
 import com.android.tools.smali.dexlib2.iface.DexFile;
+import com.android.tools.smali.dexlib2.iface.Method;
+import com.android.tools.smali.dexlib2.iface.MethodImplementation;
 import com.android.tools.smali.dexlib2.iface.instruction.Instruction;
 import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction35c;
 import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction3rc;
@@ -46,9 +48,8 @@ final class DexCallsiteTransformer {
     private static final String SOURCE_METHOD = "getPackageInfo";
     private static final String SOURCE_RETURN = "Landroid/content/pm/PackageInfo;";
     private static final List<String> SOURCE_PARAMS = List.of("Ljava/lang/String;", "I");
-    private static final String HOOK_CLASS = "Lcom/fixhua/runtime/PackageManagerHooks;";
     private static final ImmutableMethodReference HOOK_REFERENCE = new ImmutableMethodReference(
-            HOOK_CLASS,
+            "Lcom/fixhua/runtime/PackageManagerHooks;",
             SOURCE_METHOD,
             List.of("Landroid/content/pm/PackageManager;", "Ljava/lang/String;", "I"),
             SOURCE_RETURN);
@@ -58,17 +59,14 @@ final class DexCallsiteTransformer {
     static Result transform(Context context, File sourceApk) throws Exception {
         if (sourceApk == null || !sourceApk.isFile()) throw new IllegalStateException("Source APK missing");
         if (sourceApk.canWrite()) throw new SecurityException("Source APK must be immutable before transform");
-
         String sourceHash = sha256(sourceApk);
         File directory = new File(context.getCodeCacheDir(), "transformed-images-v1");
-        if (!directory.exists() && !directory.mkdirs()) {
-            throw new IllegalStateException("Cannot create transform directory");
-        }
+        if (!directory.exists() && !directory.mkdirs()) throw new IllegalStateException("Cannot create transform directory");
         File output = new File(directory, sourceHash + "-" + TRANSFORM_ID + ".apk");
         File temp = new File(directory, output.getName() + ".tmp");
         if (temp.exists() && !temp.delete()) throw new IllegalStateException("Cannot reset transform temp");
 
-        AtomicInteger rewritten = new AtomicInteger();
+        AtomicInteger sourceCallsites = new AtomicInteger();
         try (ZipFile input = new ZipFile(sourceApk);
              ZipOutputStream zipOut = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temp)))) {
             Enumeration<? extends ZipEntry> entries = input.entries();
@@ -81,25 +79,18 @@ final class DexCallsiteTransformer {
                     zipOut.closeEntry();
                     continue;
                 }
-                // The derived APK is never installed. Drop stale source signing metadata so the
-                // execution image cannot be mistaken for the verified immutable source artifact.
                 String upper = entry.getName().toUpperCase(Locale.ROOT);
                 if (upper.startsWith("META-INF/")
-                        && (upper.endsWith(".RSA") || upper.endsWith(".DSA")
-                        || upper.endsWith(".EC") || upper.endsWith(".SF")
-                        || upper.equals("META-INF/MANIFEST.MF"))) {
-                    continue;
-                }
+                        && (upper.endsWith(".RSA") || upper.endsWith(".DSA") || upper.endsWith(".EC")
+                        || upper.endsWith(".SF") || upper.equals("META-INF/MANIFEST.MF"))) continue;
 
                 ZipEntry outEntry = new ZipEntry(entry.getName());
                 outEntry.setTime(0L);
                 zipOut.putNextEntry(outEntry);
                 if (isDexEntry(entry.getName())) {
-                    rewriteDex(input.getInputStream(entry), zipOut, rewritten);
+                    rewriteDex(input.getInputStream(entry), zipOut, sourceCallsites);
                 } else {
-                    try (InputStream in = new BufferedInputStream(input.getInputStream(entry))) {
-                        copy(in, zipOut);
-                    }
+                    try (InputStream in = new BufferedInputStream(input.getInputStream(entry))) { copy(in, zipOut); }
                 }
                 zipOut.closeEntry();
             }
@@ -108,7 +99,7 @@ final class DexCallsiteTransformer {
             throw failure;
         }
 
-        if (rewritten.get() <= 0) {
+        if (sourceCallsites.get() <= 0) {
             temp.delete();
             throw new SecurityException("Expected PackageManager callsite was not found");
         }
@@ -124,30 +115,24 @@ final class DexCallsiteTransformer {
             output.delete();
             throw new SecurityException("Cannot make transformed image read-only");
         }
-        return new Result(output, rewritten.get(), sourceHash, sha256(output));
+        return new Result(output, sourceCallsites.get(), sourceHash, sha256(output));
     }
 
-    private static void rewriteDex(InputStream raw, OutputStream destination, AtomicInteger rewritten)
+    private static void rewriteDex(InputStream raw, OutputStream destination, AtomicInteger sourceCallsites)
             throws Exception {
         File tempDex = File.createTempFile("fixhua-rewritten-", ".dex");
         try {
             DexFile dex;
             try (BufferedInputStream in = new BufferedInputStream(raw)) {
-                dex = com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile.fromInputStream(
-                        Opcodes.getDefault(), in);
+                dex = com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile.fromInputStream(Opcodes.getDefault(), in);
             }
-
+            sourceCallsites.addAndGet(countTargetCallsites(dex));
             RewriterModule module = new RewriterModule() {
-                @Override
-                public Rewriter<Instruction> getInstructionRewriter(Rewriters rewriters) {
+                @Override public Rewriter<Instruction> getInstructionRewriter(Rewriters rewriters) {
                     InstructionRewriter delegate = new InstructionRewriter(rewriters);
                     return instruction -> {
                         Instruction transformed = rewriteInstruction(instruction);
-                        if (transformed != instruction) {
-                            rewritten.incrementAndGet();
-                            return transformed;
-                        }
-                        return delegate.rewrite(instruction);
+                        return transformed != instruction ? transformed : delegate.rewrite(instruction);
                     };
                 }
             };
@@ -161,36 +146,49 @@ final class DexCallsiteTransformer {
         }
     }
 
-    private static Instruction rewriteInstruction(Instruction instruction) {
+    private static int countTargetCallsites(DexFile dex) {
+        int count = 0;
+        for (ClassDef classDef : dex.getClasses()) {
+            for (Method method : classDef.getMethods()) {
+                MethodImplementation implementation = method.getImplementation();
+                if (implementation == null) continue;
+                for (Instruction instruction : implementation.getInstructions()) {
+                    if (isTargetInstruction(instruction)) count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private static boolean isTargetInstruction(Instruction instruction) {
         if (instruction instanceof Instruction35c call) {
-            if (call.getOpcode() == Opcode.INVOKE_VIRTUAL && isTarget(call.getReference())) {
-                return new ImmutableInstruction35c(
-                        Opcode.INVOKE_STATIC,
-                        call.getRegisterCount(),
-                        call.getRegisterC(),
-                        call.getRegisterD(),
-                        call.getRegisterE(),
-                        call.getRegisterF(),
-                        call.getRegisterG(),
-                        HOOK_REFERENCE);
-            }
-        } else if (instruction instanceof Instruction3rc call) {
-            if (call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE && isTarget(call.getReference())) {
-                return new ImmutableInstruction3rc(
-                        Opcode.INVOKE_STATIC_RANGE,
-                        call.getStartRegister(),
-                        call.getRegisterCount(),
-                        HOOK_REFERENCE);
-            }
+            return call.getOpcode() == Opcode.INVOKE_VIRTUAL && isTarget(call.getReference());
+        }
+        if (instruction instanceof Instruction3rc call) {
+            return call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE && isTarget(call.getReference());
+        }
+        return false;
+    }
+
+    private static Instruction rewriteInstruction(Instruction instruction) {
+        if (instruction instanceof Instruction35c call
+                && call.getOpcode() == Opcode.INVOKE_VIRTUAL && isTarget(call.getReference())) {
+            return new ImmutableInstruction35c(
+                    Opcode.INVOKE_STATIC, call.getRegisterCount(), call.getRegisterC(), call.getRegisterD(),
+                    call.getRegisterE(), call.getRegisterF(), call.getRegisterG(), HOOK_REFERENCE);
+        }
+        if (instruction instanceof Instruction3rc call
+                && call.getOpcode() == Opcode.INVOKE_VIRTUAL_RANGE && isTarget(call.getReference())) {
+            return new ImmutableInstruction3rc(
+                    Opcode.INVOKE_STATIC_RANGE, call.getStartRegister(), call.getRegisterCount(), HOOK_REFERENCE);
         }
         return instruction;
     }
 
     private static boolean isTarget(Object reference) {
         if (!(reference instanceof MethodReference method)) return false;
-        if (!SOURCE_CLASS.equals(method.getDefiningClass())) return false;
-        if (!SOURCE_METHOD.equals(method.getName())) return false;
-        if (!SOURCE_RETURN.equals(method.getReturnType())) return false;
+        if (!SOURCE_CLASS.equals(method.getDefiningClass()) || !SOURCE_METHOD.equals(method.getName())
+                || !SOURCE_RETURN.equals(method.getReturnType())) return false;
         List<? extends CharSequence> parameters = method.getParameterTypes();
         if (parameters.size() != SOURCE_PARAMS.size()) return false;
         for (int i = 0; i < parameters.size(); i++) {
