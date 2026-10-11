@@ -5,17 +5,21 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.content.pm.PackageManager;
-import android.os.Handler;
-import android.os.UserHandle;
 
 /**
- * Context boundary presented to transformed ordinary Activities. It exposes only explicitly modeled
- * compatibility surfaces and prevents imported code from inheriting Runtime-family IPC authority.
+ * Context boundary presented to imported code. It exposes only explicitly modeled compatibility
+ * surfaces and prevents target code from inheriting Runtime-family IPC authority.
  */
 final class SyntheticRestrictedContext extends ContextWrapper {
+    private final Context syntheticApplicationContext;
+
     SyntheticRestrictedContext(Context host) {
+        this(host, null);
+    }
+
+    SyntheticRestrictedContext(Context host, Context syntheticApplicationContext) {
         super(host);
+        this.syntheticApplicationContext = syntheticApplicationContext;
     }
 
     @Override
@@ -25,7 +29,7 @@ final class SyntheticRestrictedContext extends ContextWrapper {
 
     @Override
     public Context getApplicationContext() {
-        return this;
+        return syntheticApplicationContext != null ? syntheticApplicationContext : this;
     }
 
     @Override
@@ -67,12 +71,12 @@ final class SyntheticRestrictedContext extends ContextWrapper {
 
     @Override
     public ComponentName startService(Intent service) {
-        throw new SecurityException("Imported Activity cannot start arbitrary host services");
+        throw new SecurityException("Imported code cannot start arbitrary host services");
     }
 
     @Override
     public ComponentName startForegroundService(Intent service) {
-        throw new SecurityException("Imported Activity cannot start arbitrary host foreground services");
+        throw new SecurityException("Imported code cannot start arbitrary host foreground services");
     }
 
     private static void emitBlockedBinding(Intent intent) {
@@ -82,7 +86,7 @@ final class SyntheticRestrictedContext extends ContextWrapper {
         }
         ExecutionEvidenceEmitter.emit(
                 com.fixhua.core.SyntheticSlicePlans.CAPABILITY_SYNTHETIC_SLICE_V1,
-                "runtime.restricted-context-v1",
+                "runtime.restricted-context-v2",
                 com.fixhua.core.ExecutionEvidence.Decision.UNSUPPORTED,
                 com.fixhua.core.CoreModels.TruthScope.SYNTHETIC_VIEW,
                 "bind-service",
