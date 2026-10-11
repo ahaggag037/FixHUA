@@ -44,7 +44,8 @@ final class ArtifactImporter {
             File artifactFile,
             File metadataFile,
             SyntheticPackageRecord record,
-            boolean reusedExistingArtifact) {}
+            boolean reusedExistingArtifact,
+            RuntimeSessionStore.Session runtimeSession) {}
 
     private final Context context;
     private final PackageManager packageManager;
@@ -56,21 +57,30 @@ final class ArtifactImporter {
 
     ImportedArtifact importUri(Uri uri) throws Exception {
         if (uri == null) throw new IllegalArgumentException("uri");
+        try (InputStream raw = context.getContentResolver().openInputStream(uri)) {
+            if (raw == null) throw new IOException("Selected document cannot be opened");
+            return importStream(raw);
+        }
+    }
 
+    ImportedArtifact importInstalledPackageForAcceptance(String packageName) throws Exception {
+        ApplicationInfo info = packageManager.getApplicationInfo(packageName, 0);
+        File source = new File(info.sourceDir);
+        if (!source.isFile()) throw new IOException("Installed acceptance package source is missing");
+        try (InputStream raw = new FileInputStream(source)) {
+            return importStream(raw);
+        }
+    }
+
+    private ImportedArtifact importStream(InputStream raw) throws Exception {
         File store = new File(context.getFilesDir(), STORE_DIR);
         if (!store.exists() && !store.mkdirs()) {
             throw new IOException("Cannot create artifact store");
         }
 
         File incoming = File.createTempFile("incoming-", ".apk", store);
-        boolean keepIncoming = false;
         try {
-            CopyResult copied;
-            try (InputStream raw = context.getContentResolver().openInputStream(uri)) {
-                if (raw == null) throw new IOException("Selected document cannot be opened");
-                copied = copyAndHash(raw, incoming);
-            }
-
+            CopyResult copied = copyAndHash(raw, incoming);
             ParsedArchive parsed = parseArchive(incoming, copied.sha256(), copied.bytes());
             SyntheticPackageRecord record = parsed.record();
 
@@ -81,22 +91,28 @@ final class ArtifactImporter {
                         || !copied.sha256().equals(sha256(finalApk))) {
                     throw new IOException("Content-addressed artifact store is inconsistent");
                 }
+                if (finalApk.canWrite()) {
+                    throw new SecurityException("Existing content-addressed artifact is writable");
+                }
                 reused = true;
             } else {
                 if (!incoming.renameTo(finalApk)) {
                     throw new IOException("Cannot commit imported artifact");
                 }
-                keepIncoming = true;
-                makeReadOnly(finalApk);
+                try {
+                    makeReadOnly(finalApk);
+                } catch (Exception failure) {
+                    if (finalApk.exists() && !finalApk.delete()) finalApk.deleteOnExit();
+                    throw failure;
+                }
             }
 
             File metadata = new File(store, copied.sha256() + ".json");
             writeMetadataAtomically(metadata, record, parsed.nativeAbis());
-            return new ImportedArtifact(finalApk, metadata, record, reused);
+            RuntimeSessionStore.Session session = new RuntimeSessionStore(context).create(record);
+            return new ImportedArtifact(finalApk, metadata, record, reused, session);
         } finally {
-            if (!keepIncoming && incoming.exists() && !incoming.delete()) {
-                incoming.deleteOnExit();
-            }
+            if (incoming.exists() && !incoming.delete()) incoming.deleteOnExit();
         }
     }
 
