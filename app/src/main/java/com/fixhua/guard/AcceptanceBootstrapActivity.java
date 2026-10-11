@@ -15,6 +15,8 @@ import android.widget.TextView;
 public final class AcceptanceBootstrapActivity extends Activity {
     private static final String TAG = "FixHUAAcceptance";
     private static final String SAMPLE_PACKAGE = "com.fixhua.sampletarget";
+    private static final String EXTRA_ACCEPTANCE_SECURITY_PROBE =
+            "com.fixhua.runtime.extra.ACCEPTANCE_SECURITY_PROBE";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -47,6 +49,7 @@ public final class AcceptanceBootstrapActivity extends Activity {
                 runtime.putExtra("com.fixhua.runtime.extra.SESSION_ID", session.sessionId());
                 runtime.putExtra("com.fixhua.runtime.extra.ARTIFACT_SHA256", session.artifactSha256());
                 runtime.putExtra("com.fixhua.runtime.extra.PLAN_DIGEST", session.planDigest());
+                runtime.putExtra(EXTRA_ACCEPTANCE_SECURITY_PROBE, true);
                 runOnUiThread(() -> {
                     startActivity(runtime);
                     finish();
