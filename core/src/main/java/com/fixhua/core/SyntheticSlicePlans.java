@@ -4,6 +4,7 @@ import static com.fixhua.core.CoreModels.AuthorityPlane.P0_PUBLIC;
 import static com.fixhua.core.CoreModels.AuthorityPlane.P5_SYNTHETIC;
 import static com.fixhua.core.CoreModels.Persistence.SESSION;
 import static com.fixhua.core.CoreModels.ProviderSemantics.EXACT;
+import static com.fixhua.core.CoreModels.TruthScope.HOST_REAL;
 import static com.fixhua.core.CoreModels.TruthScope.HOST_DELEGATED;
 import static com.fixhua.core.CoreModels.TruthScope.SYNTHETIC_VIEW;
 
@@ -13,11 +14,13 @@ import java.util.Set;
 /** Frozen minimal plans used by Synthetic Slice V1. */
 public final class SyntheticSlicePlans {
     public static final int CAPABILITY_READ_IMPORTED_ARTIFACT = 1001;
+    public static final int CAPABILITY_HOST_GBOX_PACKAGE_FACT = 1002;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_IDENTITY = 1101;
     public static final int CAPABILITY_SYNTHETIC_PACKAGE_QUERY = 1102;
     public static final int CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY = 1103;
+    public static final int CAPABILITY_SYNTHETIC_SLICE_V1 = 1200;
     public static final String RECIPE_ID = "sample.synthetic.v1";
-    public static final int RECIPE_VERSION = 4;
+    public static final int RECIPE_VERSION = 5;
 
     private static CoreModels.ProviderDescriptor artifactProvider() {
         return new CoreModels.ProviderDescriptor(
@@ -27,6 +30,21 @@ public final class SyntheticSlicePlans {
                 Set.of(CAPABILITY_READ_IMPORTED_ARTIFACT),
                 Set.of(),
                 Set.of(HOST_DELEGATED),
+                EXACT,
+                SESSION,
+                false,
+                0,
+                0);
+    }
+
+    private static CoreModels.ProviderDescriptor hostGboxFactProvider() {
+        return new CoreModels.ProviderDescriptor(
+                "controller.host-gbox-package-fact",
+                "1",
+                P0_PUBLIC,
+                Set.of(CAPABILITY_HOST_GBOX_PACKAGE_FACT),
+                Set.of(),
+                Set.of(HOST_REAL),
                 EXACT,
                 SESSION,
                 false,
@@ -79,6 +97,21 @@ public final class SyntheticSlicePlans {
                 0);
     }
 
+    private static CoreModels.ProviderDescriptor sliceProvider() {
+        return new CoreModels.ProviderDescriptor(
+                "runtime.synthetic-slice-v1",
+                "1",
+                P5_SYNTHETIC,
+                Set.of(CAPABILITY_SYNTHETIC_SLICE_V1),
+                Set.of(CAPABILITY_HOST_GBOX_PACKAGE_FACT, CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY),
+                Set.of(SYNTHETIC_VIEW),
+                EXACT,
+                SESSION,
+                false,
+                0,
+                0);
+    }
+
     public static CoreModels.ResolutionPlan artifactReadPlan()
             throws CapabilityResolver.ResolutionException {
         CoreModels.CapabilityRequest request = new CoreModels.CapabilityRequest(
@@ -92,7 +125,7 @@ public final class SyntheticSlicePlans {
     public static CoreModels.ResolutionPlan runtimeSessionPlan()
             throws CapabilityResolver.ResolutionException {
         CoreModels.CapabilityRequest request = new CoreModels.CapabilityRequest(
-                CAPABILITY_SYNTHETIC_CONTEXT_IDENTITY,
+                CAPABILITY_SYNTHETIC_SLICE_V1,
                 Set.of(SYNTHETIC_VIEW),
                 EXACT,
                 false);
@@ -100,9 +133,11 @@ public final class SyntheticSlicePlans {
                 request,
                 List.of(
                         artifactProvider(),
+                        hostGboxFactProvider(),
                         packageIdentityProvider(),
                         packageQueryProvider(),
-                        contextIdentityProvider()));
+                        contextIdentityProvider(),
+                        sliceProvider()));
     }
 
     private SyntheticSlicePlans() {}
