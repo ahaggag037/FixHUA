@@ -13,13 +13,19 @@ import android.os.Process;
 import android.util.Log;
 import android.widget.TextView;
 
+import java.io.File;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class RuntimeActivity extends Activity {
     private static final String TAG = "FixHUARuntime";
     private static final String BROKER_DESCRIPTOR = "com.fixhua.guard.IHostCapabilityBroker";
     private static final int TRANSACTION_GET_PROTOCOL = IBinder.FIRST_CALL_TRANSACTION;
+    private static final int SESSION_PROTOCOL_VERSION = 2;
     private static final AtomicInteger CREATE_COUNT = new AtomicInteger();
+
+    public static final String EXTRA_SESSION_ID = "com.fixhua.runtime.extra.SESSION_ID";
+    public static final String EXTRA_ARTIFACT_SHA256 = "com.fixhua.runtime.extra.ARTIFACT_SHA256";
+    public static final String EXTRA_PLAN_DIGEST = "com.fixhua.runtime.extra.PLAN_DIGEST";
 
     private TextView status;
     private boolean bound;
@@ -40,7 +46,20 @@ public final class RuntimeActivity extends Activity {
                 status.setText("Runtime UID: " + Process.myUid()
                         + "\nController bridge: authenticated"
                         + "\nProtocol: " + protocol);
-                runArtifactProbe();
+
+                SessionArgs session = SessionArgs.from(getIntent());
+                if (session != null) {
+                    if (protocol < SESSION_PROTOCOL_VERSION) {
+                        throw new SecurityException("Controller protocol does not support Runtime sessions");
+                    }
+                    runSessionArtifactProbe(service, session);
+                } else {
+                    // Temporary compatibility fallback for the pre-session CI path. New Controller
+                    // user flow always supplies a session-bound artifact. This fallback will be
+                    // removed once the CI bootstrap imports its sample through Controller storage.
+                    Log.w(TAG, "legacyArtifactFallback=true");
+                    runLegacyArtifactProbe();
+                }
             } catch (Exception e) {
                 Log.e(TAG, "bridgeAuthenticated=false", e);
                 status.setText("Runtime UID: " + Process.myUid()
@@ -99,7 +118,35 @@ public final class RuntimeActivity extends Activity {
                 + " configGeneration=" + RuntimeApp.configurationGeneration());
     }
 
-    private void runArtifactProbe() {
+    private void runSessionArtifactProbe(IBinder broker, SessionArgs session) {
+        RuntimeApp.assertReady("sessionArtifactProbe");
+        try {
+            File image = RuntimeSessionArtifact.obtain(
+                    this,
+                    broker,
+                    session.sessionId(),
+                    session.artifactSha256(),
+                    session.planDigest());
+            RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this, image);
+            if (!session.artifactSha256().equalsIgnoreCase(result.artifactSha256())) {
+                throw new SecurityException("Loaded artifact differs from active session");
+            }
+            Log.i(TAG, "sessionArtifact=true code=" + result.codeMarker()
+                    + " resource=" + result.resourceMarker()
+                    + " sha256=" + result.artifactSha256()
+                    + " imageReadOnly=" + !image.canWrite());
+            status.append("\nSession artifact: verified");
+            status.append("\nExternal APK code: " + result.codeMarker());
+            status.append("\nExternal APK resource: " + result.resourceMarker());
+            status.append("\nArtifact SHA-256: " + result.artifactSha256().substring(0, 12) + "…");
+            status.append("\nExecution image: read-only");
+        } catch (Exception e) {
+            Log.e(TAG, "sessionArtifact=false", e);
+            status.append("\nSession artifact failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private void runLegacyArtifactProbe() {
         RuntimeApp.assertReady("artifactProbe");
         try {
             RuntimeArtifactProbe.Result result = RuntimeArtifactProbe.run(this);
@@ -126,5 +173,20 @@ public final class RuntimeActivity extends Activity {
             bound = false;
         }
         super.onDestroy();
+    }
+
+    private record SessionArgs(String sessionId, String artifactSha256, String planDigest) {
+        static SessionArgs from(Intent intent) {
+            if (intent == null) return null;
+            String sessionId = intent.getStringExtra(EXTRA_SESSION_ID);
+            String artifactSha256 = intent.getStringExtra(EXTRA_ARTIFACT_SHA256);
+            String planDigest = intent.getStringExtra(EXTRA_PLAN_DIGEST);
+            boolean any = sessionId != null || artifactSha256 != null || planDigest != null;
+            if (!any) return null;
+            if (sessionId == null || artifactSha256 == null || planDigest == null) {
+                throw new SecurityException("Incomplete Runtime session envelope");
+            }
+            return new SessionArgs(sessionId, artifactSha256, planDigest);
+        }
     }
 }
