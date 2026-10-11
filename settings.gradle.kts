@@ -16,3 +16,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "FixHUA"
 include(":app")
+include(":core")
+include(":runtime")
+include(":sample-target")
