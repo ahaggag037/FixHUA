@@ -15,6 +15,12 @@ import java.util.Map;
 import java.util.Set;
 
 public final class CapabilityResolver {
+    private static final Set<TruthScope> ALL_TRUTH_SCOPES = Set.of(
+            TruthScope.HOST_REAL,
+            TruthScope.HOST_DELEGATED,
+            TruthScope.SYNTHETIC_VIEW,
+            TruthScope.GUEST_REAL);
+
     public static final class ResolutionException extends Exception {
         public ResolutionException(String message) { super(message); }
     }
@@ -23,14 +29,23 @@ public final class CapabilityResolver {
             throws ResolutionException {
         Map<Integer, List<ProviderDescriptor>> byCapability = index(providers);
         LinkedHashMap<Integer, ResolutionStep> steps = new LinkedHashMap<>();
-        resolveCapability(request.capabilityId(), request, byCapability, steps, new HashSet<>());
+        resolveCapability(
+                request.capabilityId(),
+                request.allowedTruthScopes(),
+                request.minimumSemantics(),
+                request.destructiveAllowed(),
+                byCapability,
+                steps,
+                new HashSet<>());
         List<ResolutionStep> ordered = new ArrayList<>(steps.values());
         return new ResolutionPlan(ordered, digest(ordered));
     }
 
     private void resolveCapability(
             int capabilityId,
-            CapabilityRequest rootRequest,
+            Set<TruthScope> allowedTruthScopes,
+            ProviderSemantics minimumSemantics,
+            boolean destructiveAllowed,
             Map<Integer, List<ProviderDescriptor>> byCapability,
             LinkedHashMap<Integer, ResolutionStep> steps,
             Set<Integer> visiting) throws ResolutionException {
@@ -40,10 +55,10 @@ public final class CapabilityResolver {
         }
 
         List<ProviderDescriptor> candidates = byCapability.getOrDefault(capabilityId, List.of()).stream()
-                .filter(p -> semanticAcceptable(p.semantics(), rootRequest.minimumSemantics()))
-                .filter(p -> p.truthScopes().stream().anyMatch(rootRequest.allowedTruthScopes()::contains))
-                .filter(p -> rootRequest.destructiveAllowed() || !p.destructive())
-                .sorted(providerComparator(rootRequest.allowedTruthScopes()))
+                .filter(p -> semanticAcceptable(p.semantics(), minimumSemantics))
+                .filter(p -> p.truthScopes().stream().anyMatch(allowedTruthScopes::contains))
+                .filter(p -> destructiveAllowed || !p.destructive())
+                .sorted(providerComparator(allowedTruthScopes))
                 .toList();
 
         ResolutionException lastFailure = null;
@@ -51,10 +66,22 @@ public final class CapabilityResolver {
             LinkedHashMap<Integer, ResolutionStep> trialSteps = new LinkedHashMap<>(steps);
             Set<Integer> trialVisiting = new HashSet<>(visiting);
             try {
-                for (int dep : provider.requires()) {
-                    resolveCapability(dep, rootRequest, byCapability, trialSteps, trialVisiting);
+                List<Integer> dependencies = provider.requires().stream().sorted().toList();
+                for (int dep : dependencies) {
+                    // A synthetic requested outcome can legitimately depend on a real host action,
+                    // and a real host outcome can depend on a synthetic planning primitive. Truth
+                    // scope constraints therefore apply to the requested capability, not blindly to
+                    // every dependency. Each resolved dependency records its own actual truth scope.
+                    resolveCapability(
+                            dep,
+                            ALL_TRUTH_SCOPES,
+                            minimumSemantics,
+                            destructiveAllowed,
+                            byCapability,
+                            trialSteps,
+                            trialVisiting);
                 }
-                TruthScope chosenScope = chooseTruthScope(provider.truthScopes(), rootRequest.allowedTruthScopes());
+                TruthScope chosenScope = chooseTruthScope(provider.truthScopes(), allowedTruthScopes);
                 trialSteps.put(capabilityId, new ResolutionStep(
                         capabilityId,
                         provider.providerId(),
@@ -74,9 +101,9 @@ public final class CapabilityResolver {
         visiting.remove(capabilityId);
         if (lastFailure != null) throw lastFailure;
         throw new ResolutionException("No provider for capability " + capabilityId
-                + " matching truth=" + rootRequest.allowedTruthScopes()
-                + " semantics>=" + rootRequest.minimumSemantics()
-                + " destructiveAllowed=" + rootRequest.destructiveAllowed());
+                + " matching truth=" + allowedTruthScopes
+                + " semantics>=" + minimumSemantics
+                + " destructiveAllowed=" + destructiveAllowed);
     }
 
     private static Map<Integer, List<ProviderDescriptor>> index(List<ProviderDescriptor> providers) {
