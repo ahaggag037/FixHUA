@@ -11,6 +11,7 @@ import android.widget.Toast;
 
 import com.fixhua.core.BugreportAnalyzer;
 import com.fixhua.core.HostDoctor;
+import com.fixhua.core.SyntheticPackageRecord;
 
 import java.io.InputStream;
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_BUGREPORT_ZIP = 4101;
+    private static final int REQUEST_ARTIFACT_APK = 4102;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicInteger refreshGeneration = new AtomicInteger();
@@ -42,6 +44,7 @@ public final class MainActivity extends Activity {
         fixNextButton = findViewById(R.id.fixNext);
 
         findViewById(R.id.checkNow).setOnClickListener(v -> refresh(true));
+        findViewById(R.id.importArtifact).setOnClickListener(v -> openArtifactPicker());
         fixNextButton.setOnClickListener(v -> fixMostImportant());
         findViewById(R.id.launchGbox).setOnClickListener(v -> launchWithPreflight());
         findViewById(R.id.recoveryCenter).setOnClickListener(v -> showRecoveryCenter());
@@ -70,13 +73,17 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_BUGREPORT_ZIP || resultCode != RESULT_OK || data == null) return;
+        if (resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
         if (uri == null) {
-            Toast.makeText(this, "لم يتم اختيار ملف Bug Report", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "لم يتم اختيار ملف", Toast.LENGTH_LONG).show();
             return;
         }
-        analyzeBugreport(uri);
+        if (requestCode == REQUEST_BUGREPORT_ZIP) {
+            analyzeBugreport(uri);
+        } else if (requestCode == REQUEST_ARTIFACT_APK) {
+            importArtifact(uri);
+        }
     }
 
     private void refresh(boolean userRequested) {
@@ -141,6 +148,71 @@ public final class MainActivity extends Activity {
         ReadinessEngine.Finding actionable = result.firstActionable();
         fixNextButton.setEnabled(actionable != null);
         fixNextButton.setText(actionable == null ? "لا توجد مشكلة تحتاج إجراء" : "إصلاح أهم مشكلة");
+    }
+
+    private void openArtifactPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/vnd.android.package-archive");
+        try {
+            startActivityForResult(intent, REQUEST_ARTIFACT_APK);
+        } catch (RuntimeException e) {
+            Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("*/*");
+            startActivityForResult(fallback, REQUEST_ARTIFACT_APK);
+        }
+    }
+
+    private void importArtifact(Uri uri) {
+        findingsView.setText("جاري استيراد APK…\nيتم حساب SHA-256 وقراءة metadata فقط؛ لن يتم تنفيذ كود التطبيق داخل Controller.");
+        executor.execute(() -> {
+            try {
+                ArtifactImporter.ImportedArtifact imported = new ArtifactImporter(this).importUri(uri);
+                String text = formatArtifactResult(imported);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    findingsView.setText(text);
+                    new AlertDialog.Builder(this)
+                            .setTitle("تم استيراد APK")
+                            .setMessage(imported.reusedExistingArtifact()
+                                    ? "هذا الـAPK موجود بالفعل بنفس SHA-256؛ تم استخدام النسخة المخزنة بدون تكرار."
+                                    : "تم حفظ نسخة content-addressed للـAPK داخل التخزين الخاص بـFixHUA وجعلها read-only.")
+                            .setPositiveButton("حسنًا", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    findingsView.setText("تعذر استيراد APK:\n" + e.getClass().getSimpleName()
+                            + ": " + String.valueOf(e.getMessage()));
+                });
+            }
+        });
+    }
+
+    private static String formatArtifactResult(ArtifactImporter.ImportedArtifact imported) {
+        SyntheticPackageRecord record = imported.record();
+        StringBuilder text = new StringBuilder();
+        text.append("Synthetic Artifact V1:\n\n");
+        text.append("• Package: ").append(record.packageName()).append('\n');
+        text.append("• Version: ").append(record.versionName().isBlank() ? "(بدون اسم)" : record.versionName())
+                .append(" (").append(record.versionCode()).append(")\n");
+        text.append("• SDK: min ").append(record.minSdk())
+                .append(" / target ").append(record.targetSdk()).append('\n');
+        text.append("• SHA-256: ").append(record.artifactSha256()).append('\n');
+        text.append("• الحجم: ")
+                .append(String.format(Locale.US, "%.2f MB", record.artifactSizeBytes() / (1024.0 * 1024.0)))
+                .append('\n');
+        text.append("• Native/JNI: ").append(record.hasNativeCode() ? "موجود" : "غير موجود").append('\n');
+        text.append("• Debuggable: ").append(record.debuggable() ? "نعم" : "لا").append('\n');
+        text.append("• Requested permissions: ").append(record.requestedPermissions().size()).append('\n');
+        text.append("• Signing certs: ").append(record.signingCertificateSha256().size()).append('\n');
+        text.append("• Content address: ").append(record.contentAddress()).append('\n');
+        text.append("• Store: Controller private + read-only artifact\n");
+        text.append("• Controller code execution: ممنوع\n");
+        text.append("• الحالة التالية: جاهز لإنشاء Runtime Session وتمرير descriptor read-only.");
+        return text.toString();
     }
 
     private void openBugreportPicker() {
@@ -354,7 +426,7 @@ public final class MainActivity extends Activity {
                 if (isFinishing() || isDestroyed()) return;
                 Intent share = new Intent(Intent.ACTION_SEND)
                         .setType("text/plain")
-                        .putExtra(Intent.EXTRA_SUBJECT, "FixHUA v2 report")
+                        .putExtra(Intent.EXTRA_SUBJECT, "FixHUA v2.1 report")
                         .putExtra(Intent.EXTRA_TEXT, report);
                 try {
                     startActivity(Intent.createChooser(share, "مشاركة تقرير FixHUA"));
