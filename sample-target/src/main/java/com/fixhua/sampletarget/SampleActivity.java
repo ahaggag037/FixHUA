@@ -17,10 +17,17 @@ public final class SampleActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         String baseline = ProbeEntry.run(this);
-        Log.i(TAG, "hostBaseline=true " + baseline);
+        Context appContext = getApplicationContext();
+        String appContextPackage = appContext == null ? "null" : appContext.getPackageName();
+        String appContextClass = appContext == null ? "null" : appContext.getClass().getName();
+        Log.i(TAG, "hostBaseline=true " + baseline
+                + ";appContextPackage=" + appContextPackage
+                + ";appContextClass=" + appContextClass);
         TextView text = new TextView(this);
         text.setPadding(32, 48, 32, 32);
-        text.setText("FixHUA Sample Target\nHost baseline:\n" + baseline);
+        text.setText("FixHUA Sample Target\nHost baseline:\n" + baseline
+                + "\nApplication context: " + appContextPackage
+                + " / " + appContextClass);
         setContentView(text);
         verifyControllerBridgeIsDenied();
     }
