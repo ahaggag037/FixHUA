@@ -1,0 +1,192 @@
+name: FixHUA Synthetic System CI
+
+on:
+  push:
+    branches: [ 'research/synthetic-system-v1' ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'core/**'
+      - 'runtime/**'
+      - 'sample-target/**'
+      - 'app/**'
+      - 'research/**'
+      - '.github/workflows/synthetic-system-ci.yml'
+
+jobs:
+  synthetic-slice:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Core and controller unit tests
+        run: |
+          gradle --stacktrace :core:test
+          gradle --stacktrace :app:testReleaseUnitTest
+
+      - name: Lint all Android applications
+        run: gradle --stacktrace :app:lintRelease :runtime:lintRelease :sample-target:lintRelease
+
+      - name: Build all release APKs
+        run: gradle --stacktrace :app:assembleRelease :runtime:assembleRelease :sample-target:assembleRelease
+
+      - name: Create isolated CI signing identities
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/fixhua-family.jks" \
+            -storepass "FixHUA-Synthetic-CI" \
+            -keypass "FixHUA-Synthetic-CI" \
+            -alias fixhua-family \
+            -keyalg RSA -keysize 3072 -validity 10000 \
+            -dname "CN=FixHUA Synthetic CI Family, O=FixHUA, C=EG" \
+            -storetype PKCS12
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/fixhua-foreign.jks" \
+            -storepass "FixHUA-Foreign-CI" \
+            -keypass "FixHUA-Foreign-CI" \
+            -alias fixhua-foreign \
+            -keyalg RSA -keysize 3072 -validity 10000 \
+            -dname "CN=FixHUA Foreign Test, O=FixHUA Test, C=EG" \
+            -storetype PKCS12
+
+      - name: Align and sign controller runtime and foreign sample
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+
+          sign_family() {
+            local in="$1" out="$2"
+            "$BT/zipalign" -f 4 "$in" "$out"
+            "$BT/apksigner" sign \
+              --ks "$RUNNER_TEMP/fixhua-family.jks" \
+              --ks-key-alias fixhua-family \
+              --ks-pass pass:FixHUA-Synthetic-CI \
+              --key-pass pass:FixHUA-Synthetic-CI \
+              "$out"
+          }
+          sign_foreign() {
+            local in="$1" out="$2"
+            "$BT/zipalign" -f 4 "$in" "$out"
+            "$BT/apksigner" sign \
+              --ks "$RUNNER_TEMP/fixhua-foreign.jks" \
+              --ks-key-alias fixhua-foreign \
+              --ks-pass pass:FixHUA-Foreign-CI \
+              --key-pass pass:FixHUA-Foreign-CI \
+              "$out"
+          }
+
+          sign_family app/build/outputs/apk/release/app-release-unsigned.apk dist/FixHUA-Controller.apk
+          sign_family runtime/build/outputs/apk/release/runtime-release-unsigned.apk dist/FixHUA-Runtime.apk
+          sign_foreign sample-target/build/outputs/apk/release/sample-target-release-unsigned.apk dist/FixHUA-SampleTarget.apk
+
+      - name: Verify identities signatures and permission boundary
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          for apk in dist/*.apk; do
+            "$BT/apksigner" verify --verbose --print-certs "$apk" | tee "$apk.cert.txt"
+            "$BT/aapt" dump badging "$apk" | tee "$apk.badging.txt"
+            "$BT/aapt" dump permissions "$apk" | tee "$apk.permissions.txt"
+          done
+
+          grep -q "package: name='com.fixhua.guard'" dist/FixHUA-Controller.apk.badging.txt
+          grep -q "package: name='com.fixhua.runtime'" dist/FixHUA-Runtime.apk.badging.txt
+          grep -q "package: name='com.fixhua.sampletarget'" dist/FixHUA-SampleTarget.apk.badging.txt
+
+          family_controller=$(grep -m1 'certificate SHA-256 digest:' dist/FixHUA-Controller.apk.cert.txt | sed 's/.*digest: //')
+          family_runtime=$(grep -m1 'certificate SHA-256 digest:' dist/FixHUA-Runtime.apk.cert.txt | sed 's/.*digest: //')
+          foreign_sample=$(grep -m1 'certificate SHA-256 digest:' dist/FixHUA-SampleTarget.apk.cert.txt | sed 's/.*digest: //')
+          test "$family_controller" = "$family_runtime"
+          test "$family_controller" != "$foreign_sample"
+
+          grep -q 'com.fixhua.guard.permission.RUNTIME_BRIDGE' dist/FixHUA-Runtime.apk.permissions.txt
+          for forbidden in android.permission.DUMP android.permission.READ_LOGS android.permission.WRITE_SECURE_SETTINGS android.permission.REQUEST_INSTALL_PACKAGES android.permission.MANAGE_EXTERNAL_STORAGE; do
+            if grep -q "$forbidden" dist/FixHUA-Runtime.apk.permissions.txt; then
+              echo "Runtime privilege boundary violated: $forbidden"
+              exit 1
+            fi
+          done
+
+          sha256sum dist/*.apk | tee dist/SHA256SUMS.txt
+
+      - name: Enable KVM for Android 12 security smoke
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Android 12 two-UID and IPC security smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            adb install dist/FixHUA-Controller.apk
+            adb install dist/FixHUA-Runtime.apk
+            adb install dist/FixHUA-SampleTarget.apk
+
+            controller_uid=$(adb shell dumpsys package com.fixhua.guard | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1 | tr -d '\r')
+            runtime_uid=$(adb shell dumpsys package com.fixhua.runtime | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1 | tr -d '\r')
+            sample_uid=$(adb shell dumpsys package com.fixhua.sampletarget | sed -n 's/.*userId=\([0-9]*\).*/\1/p' | head -1 | tr -d '\r')
+            echo "controller_uid=$controller_uid runtime_uid=$runtime_uid sample_uid=$sample_uid" | tee dist/uid-boundary.txt
+            test -n "$controller_uid"
+            test -n "$runtime_uid"
+            test -n "$sample_uid"
+            test "$controller_uid" != "$runtime_uid"
+            test "$controller_uid" != "$sample_uid"
+            test "$runtime_uid" != "$sample_uid"
+
+            adb logcat -c
+            adb shell am start -W -n com.fixhua.guard/.MainActivity >/dev/null
+            adb shell am start -W -n com.fixhua.runtime/.RuntimeActivity >/dev/null
+            sleep 2
+            adb logcat -d -v brief | tee dist/runtime-logcat.txt
+            grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=1' dist/runtime-logcat.txt
+
+            adb logcat -c
+            adb shell am start -W -n com.fixhua.sampletarget/.SampleActivity >/dev/null
+            sleep 2
+            adb logcat -d -v brief | tee dist/sample-logcat.txt
+            grep -q 'FixHUASample.*bridgeDenied=true' dist/sample-logcat.txt
+            if grep -q 'SECURITY_FAILURE' dist/sample-logcat.txt; then
+              echo 'Foreign sample unexpectedly reached Controller bridge'
+              exit 1
+            fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FixHUA-Synthetic-System-CI
+          path: |
+            dist/
+            core/build/reports/tests/test/
+            app/build/reports/tests/testReleaseUnitTest/
+            app/build/reports/lint-results-release.html
+            runtime/build/reports/lint-results-release.html
+            sample-target/build/reports/lint-results-release.html
+          if-no-files-found: error
