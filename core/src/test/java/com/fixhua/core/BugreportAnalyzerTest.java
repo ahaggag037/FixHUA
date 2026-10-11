@@ -23,10 +23,15 @@ public final class BugreportAnalyzerTest {
                 "[debug.egl.force_msaa]: [true]",
                 "Multiprocess enabled: true",
                 "WebView package dirty: false",
-                "Current WebView package: com.huawei.webview 114.0.5.302",
+                "Current WebView package (name, version): (com.huawei.webview, 114.0.5.302)",
+                // Historical/non-current occurrence: must not inflate the live process budget.
+                "ProcessRecord{old 99:com.gbox.android:vlapp99/u0a174}",
+                "ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)",
                 "ProcessRecord{aaa 111:com.gbox.android/u0a174}",
                 "ProcessRecord{bbb 112:com.gbox.android:server/u0a174}",
                 "ProcessRecord{ccc 113:com.gbox.android:vlapp01/u0a174}",
+                "-------------------------------------------------------------------------------",
+                "ProcessRecord{later 114:com.gbox.android:vlapp77/u0a174}",
                 "AppProcessKiller: doKillProcess 4",
                 "java.lang.NullPointerException: Application.getResources() on a null object reference",
                 "Input dispatching timed out com.openai.chatgpt/.MainActivity");
@@ -45,6 +50,9 @@ public final class BugreportAnalyzerTest {
         assertEquals("com.huawei.webview", result.webViewPackage());
         assertEquals("114.0.5.302", result.webViewVersion());
         assertEquals(3, result.gboxProcessNames().size());
+        assertTrue(result.gboxProcessNames().contains("com.gbox.android:vlapp01"));
+        assertFalse(result.gboxProcessNames().contains("com.gbox.android:vlapp99"));
+        assertFalse(result.gboxProcessNames().contains("com.gbox.android:vlapp77"));
         assertEquals(1, result.gboxAppProcessKillerMarkers());
         assertEquals(1, result.nullApplicationResourcesMarkers());
         assertEquals(1, result.inputDispatchTimeoutMarkers());
