@@ -29,4 +29,5 @@ android {
 
 dependencies {
     implementation(project(":core"))
+    implementation("com.android.tools.smali:smali-dexlib2:3.0.10")
 }
