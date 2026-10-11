@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <permission
+        android:name="com.fixhua.guard.permission.RUNTIME_BRIDGE"
+        android:protectionLevel="signature" />
+
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <queries>
+        <package android:name="com.fixhua.runtime" />
         <package android:name="com.gbox.android" />
         <package android:name="com.google.android.gms" />
         <package android:name="com.android.vending" />
@@ -29,6 +34,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".HostCapabilityBrokerService"
+            android:exported="true"
+            android:permission="com.fixhua.guard.permission.RUNTIME_BRIDGE" />
     </application>
 
 </manifest>
