@@ -79,7 +79,7 @@ public final class OptimizerActivity extends Activity {
                 ScrollView.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("FixHUA Optimizer 2.1");
+        title.setText("FixHUA Optimizer 2.1.1");
         title.setTextSize(28f);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
@@ -160,7 +160,8 @@ public final class OptimizerActivity extends Activity {
         summary.append("Huawei: ").append(s.huaweiEnvironment ? "مكتشفة" : "غير مؤكدة").append('\n');
         summary.append("الإنترنت: ").append(s.networkValidated ? "متحقق" : "غير متحقق").append('\n');
         summary.append("توفير الطاقة: ").append(s.powerSaveMode ? "مفعل" : "متوقف").append('\n');
-        summary.append("RAM متاح: ").append(s.availableRamMb).append(" / ").append(s.totalRamMb).append(" MB").append('\n');
+        summary.append("الذاكرة المتاحة: ").append(s.availableRamMb).append(" ميجابايت").append('\n');
+        summary.append("إجمالي الذاكرة: ").append(s.totalRamMb).append(" ميجابايت").append('\n');
         if (s.privilegedProcessProbeSuccess) {
             summary.append("حد العمليات: ").append(s.currentMaxCachedProcesses)
                     .append(" / المرجع ").append(s.referenceMaxCachedProcesses).append('\n');
