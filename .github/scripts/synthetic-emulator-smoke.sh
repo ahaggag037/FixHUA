@@ -235,7 +235,7 @@ adb shell am start -W -n com.fixhua.sampletarget/.SampleActivity
 sleep 3
 adb logcat -d -v brief > dist/sample-logcat.txt
 cat dist/sample-logcat.txt
-grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/sample-logcat.txt
+grep -Eq 'FixHUASample.*bridgeDenied=true reason=(bindService_false|SecurityException)' dist/sample-logcat.txt
 if grep -q 'FixHUASample.*bridgeConnectedUnexpectedly=true' dist/sample-logcat.txt; then
   echo "Foreign APK unexpectedly connected to protected broker" >&2
   false
