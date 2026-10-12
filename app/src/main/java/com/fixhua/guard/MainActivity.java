@@ -40,6 +40,7 @@ public final class MainActivity extends Activity {
     private volatile SystemSnapshot lastSnapshot;
     private volatile ReadinessEngine.Result lastResult;
     private volatile HostRemediationPlanner.Step lastHostRemediationStep;
+    private boolean suppressNextResumeRefresh;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,7 +68,12 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (summaryView != null) refresh(false);
+        if (summaryView == null) return;
+        if (suppressNextResumeRefresh) {
+            suppressNextResumeRefresh = false;
+            return;
+        }
+        refresh(false);
     }
 
     @Override
@@ -162,6 +168,7 @@ public final class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("application/vnd.android.package-archive");
+        suppressNextResumeRefresh = true;
         try {
             startActivityForResult(intent, REQUEST_ARTIFACT_APK);
         } catch (RuntimeException e) {
@@ -262,6 +269,7 @@ public final class MainActivity extends Activity {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("application/zip");
+        suppressNextResumeRefresh = true;
         try {
             startActivityForResult(intent, REQUEST_BUGREPORT_ZIP);
         } catch (RuntimeException e) {
