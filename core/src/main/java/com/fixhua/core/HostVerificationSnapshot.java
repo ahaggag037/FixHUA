@@ -54,7 +54,7 @@ public record HostVerificationSnapshot(
                 report.gboxProcessNames().size(),
                 report.force4xMsaa(),
                 report.alwaysFinishActivities(),
-                report.webViewInstalled(),
+                !report.webViewPackage().isBlank(),
                 report.webViewDirty(),
                 report.webViewMultiprocess(),
                 codes);
