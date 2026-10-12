@@ -60,7 +60,11 @@ final class ReadinessEngine {
             ));
         }
 
-        if (!s.networkPresent || !s.networkInternetCapable || !s.networkValidated) {
+        // NET_CAPABILITY_VALIDATED is the strongest signal that Android has actually
+        // validated Internet access. Some Huawei builds can make a secondary
+        // ConnectivityManager query fail after capabilities were read successfully;
+        // that must not turn a validated connection into a false warning.
+        if (!s.networkInternetCapable || !s.networkValidated) {
             findings.add(new Finding(
                     "NETWORK_UNVALIDATED",
                     Severity.WARNING,
@@ -154,11 +158,13 @@ final class ReadinessEngine {
             ));
         }
 
-        if (!s.microgInstalled) {
+        // Host microG is not required for GBox container mode. Do not present its
+        // absence as a finding while GBox is installed; keep it as a raw report fact.
+        if (!s.microgInstalled && !s.gboxInstalled) {
             findings.add(new Finding(
                     "MICROG_MISSING",
                     Severity.INFO,
-                    "microG غير ظاهر على الجهاز الحقيقي. GBox قد يستخدم بيئته الداخلية، لكن وضع التثبيت على الجهاز الحقيقي يحتاج microG على الأجهزة المدعومة."
+                    "microG غير ظاهر على الجهاز الحقيقي. هذا يهم فقط أوضاع التثبيت المباشر المدعومة، وليس تشغيل GBox الداخلي."
             ));
         }
 
