@@ -3,6 +3,7 @@ package com.fixhua.guard;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.widget.Button;
@@ -11,7 +12,9 @@ import android.widget.Toast;
 
 import com.fixhua.core.BugreportAnalyzer;
 import com.fixhua.core.HostDoctor;
+import com.fixhua.core.HostFixVerification;
 import com.fixhua.core.HostRemediationPlanner;
+import com.fixhua.core.HostVerificationSnapshot;
 import com.fixhua.core.SyntheticPackageRecord;
 
 import java.io.InputStream;
@@ -29,6 +32,8 @@ public final class MainActivity extends Activity {
     private static final String EXTRA_SESSION_ID = "com.fixhua.runtime.extra.SESSION_ID";
     private static final String EXTRA_ARTIFACT_SHA256 = "com.fixhua.runtime.extra.ARTIFACT_SHA256";
     private static final String EXTRA_PLAN_DIGEST = "com.fixhua.runtime.extra.PLAN_DIGEST";
+    private static final String HOST_VERIFY_PREFS = "fixhua_host_verification";
+    private static final String HOST_VERIFY_SNAPSHOT = "last_sanitized_snapshot";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicInteger refreshGeneration = new AtomicInteger();
@@ -291,7 +296,18 @@ public final class MainActivity extends Activity {
                         new HostDoctor.RuntimeBudget("observed-gbox", observedProcesses));
                 HostRemediationPlanner.Plan remediationPlan =
                         new HostRemediationPlanner().plan(hostFindings);
-                String text = formatBugreportResult(report, remediationPlan);
+
+                HostVerificationSnapshot currentVerificationSnapshot =
+                        HostVerificationSnapshot.from(report, hostFindings);
+                HostVerificationSnapshot previousVerificationSnapshot = loadHostVerificationSnapshot();
+                HostFixVerification.Result verification = previousVerificationSnapshot == null
+                        ? null
+                        : new HostFixVerification().compare(
+                                previousVerificationSnapshot,
+                                currentVerificationSnapshot);
+                saveHostVerificationSnapshot(currentVerificationSnapshot);
+
+                String text = formatBugreportResult(report, remediationPlan, verification);
                 HostRemediationPlanner.Step nextStep = remediationPlan.firstActionable();
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
@@ -302,17 +318,26 @@ public final class MainActivity extends Activity {
                             ? "لا يوجد إصلاح آمن مباشر من التقرير"
                             : "إصلاح أهم مشكلة من التقرير");
 
+                    String dialogMessage;
+                    if (verification != null && verification.hasVerifiedImprovement()) {
+                        dialogMessage = "تم التحقق من تغييرات إعدادات فعلية مقارنة بالتقرير السابق. "
+                                + "راجع قسم «التحقق بعد الإصلاح» للتفاصيل.";
+                    } else if (nextStep == null) {
+                        dialogMessage = "تم استخراج حقائق التوافق محليًا فقط. لا يوجد إجراء إعدادات آمن يمكن لـFixHUA اقتراحه مباشرة من هذه النتائج.";
+                    } else {
+                        dialogMessage = "تم إنشاء خطة إصلاح مرتبة حسب الأولوية. الخطوة الأولى: "
+                                + nextStep.recommendedAction()
+                                + " بعد تعديل الإعداد، أنشئ Full Bug Report جديدًا واستورده ليتم التحقق من التغيير.";
+                    }
+
                     AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                             .setTitle("تحليل Bug Report اكتمل")
-                            .setMessage(nextStep == null
-                                    ? "تم استخراج حقائق التوافق محليًا فقط. لا يوجد إجراء إعدادات آمن يمكن لـFixHUA اقتراحه مباشرة من هذه النتائج."
-                                    : "تم إنشاء خطة إصلاح مرتبة حسب الأولوية. الخطوة الأولى: "
-                                            + nextStep.recommendedAction())
+                            .setMessage(dialogMessage)
                             .setNegativeButton("إغلاق", null);
                     if (nextStep != null) {
                         dialog.setPositiveButton(
                                 "فتح الإعداد المطلوب",
-                                (d, which) -> SettingsNavigator.fixHostStep(this, nextStep));
+                                (d, which) -> openHostRemediationStep(nextStep));
                     } else {
                         dialog.setPositiveButton("حسنًا", null);
                     }
@@ -329,9 +354,29 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private HostVerificationSnapshot loadHostVerificationSnapshot() {
+        SharedPreferences prefs = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE);
+        String encoded = prefs.getString(HOST_VERIFY_SNAPSHOT, null);
+        if (encoded == null || encoded.isBlank()) return null;
+        try {
+            return HostVerificationSnapshot.decode(encoded);
+        } catch (IllegalArgumentException invalid) {
+            prefs.edit().remove(HOST_VERIFY_SNAPSHOT).apply();
+            return null;
+        }
+    }
+
+    private void saveHostVerificationSnapshot(HostVerificationSnapshot snapshot) {
+        getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(HOST_VERIFY_SNAPSHOT, snapshot.encode())
+                .apply();
+    }
+
     private static String formatBugreportResult(
             BugreportAnalyzer.Result report,
-            HostRemediationPlanner.Plan remediationPlan) {
+            HostRemediationPlanner.Plan remediationPlan,
+            HostFixVerification.Result verification) {
         StringBuilder text = new StringBuilder();
         text.append("نتائج Full Bug Report:\n\n");
 
@@ -371,16 +416,104 @@ public final class MainActivity extends Activity {
             }
         }
 
-        text.append("\nتم تحليل ")
+        text.append("\nالتحقق بعد الإصلاح:\n");
+        if (verification == null) {
+            text.append("• تم حفظ ملخص مُعقّم لهذه النتيجة كنقطة مقارنة محلية.\n");
+            text.append("• بعد تعديل الإعدادات، أنشئ Full Bug Report جديدًا واستورده للتحقق من التغيير.\n");
+        } else {
+            appendVerification(text, verification);
+        }
+
+        text.append("\nملاحظة: أرقام crash/ANR التاريخية لا تُستخدم لإثبات التحسن بين تقريرين.\n");
+        text.append("تم تحليل ")
                 .append(String.format(Locale.US, "%.1f MB", report.scannedBytes() / (1024.0 * 1024.0)))
-                .append(" من النص الرئيسي دون استخراج ZIP إلى التخزين.");
+                .append(" من النص الرئيسي دون استخراج ZIP إلى التخزين أو حفظ السجل الخام.");
         return text.toString();
+    }
+
+    private static void appendVerification(
+            StringBuilder text,
+            HostFixVerification.Result verification) {
+        HostVerificationSnapshot before = verification.before();
+        HostVerificationSnapshot after = verification.after();
+
+        if (verification.processLimitChanged()) {
+            text.append("• حد العمليات: ")
+                    .append(before.currentMaxCachedProcesses())
+                    .append(" → ")
+                    .append(after.currentMaxCachedProcesses());
+            if (verification.processLimitRestoredToOem()) {
+                text.append(" ✓ عاد إلى الحد القياسي/OEM");
+            }
+            text.append('\n');
+        } else {
+            text.append("• حد العمليات لم يتغير: ")
+                    .append(after.currentMaxCachedProcesses()).append('\n');
+        }
+
+        if (verification.force4xMsaaDisabled()) {
+            text.append("• Force 4x MSAA: ON → OFF ✓\n");
+        }
+        if (verification.alwaysFinishActivitiesDisabled()) {
+            text.append("• Don't keep activities: ON → OFF ✓\n");
+        }
+
+        if (!verification.resolvedFindingCodes().isEmpty()) {
+            text.append("• مشاكل لم تعد موجودة: ")
+                    .append(formatFindingCodes(verification.resolvedFindingCodes())).append('\n');
+        }
+        if (!verification.remainingFindingCodes().isEmpty()) {
+            text.append("• مشاكل ما زالت موجودة: ")
+                    .append(formatFindingCodes(verification.remainingFindingCodes())).append('\n');
+        }
+        if (!verification.introducedFindingCodes().isEmpty()) {
+            text.append("• مشاكل جديدة في التقرير الحالي: ")
+                    .append(formatFindingCodes(verification.introducedFindingCodes())).append('\n');
+        }
+        if (!verification.hasVerifiedImprovement() && !verification.hasNewProblem()) {
+            text.append("• لم يظهر تغيير إعدادات قابل للتحقق مقارنة بالتقرير السابق.\n");
+        }
+    }
+
+    private static String formatFindingCodes(List<String> codes) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < codes.size(); i++) {
+            if (i > 0) out.append("، ");
+            out.append(findingLabel(codes.get(i)));
+        }
+        return out.toString();
+    }
+
+    private static String findingLabel(String code) {
+        switch (code) {
+            case "DEV_PROCESS_LIMIT_OVERRIDE":
+                return "حد العمليات غير القياسي";
+            case "RUNTIME_PROCESS_BUDGET_CONFLICT":
+                return "تعارض ميزانية عمليات GBox";
+            case "ALWAYS_FINISH_ACTIVITIES":
+                return "Don't keep activities";
+            case "FORCE_4X_MSAA":
+                return "Force 4x MSAA";
+            case "WEBVIEW_MISSING":
+                return "WebView غير متاح";
+            case "WEBVIEW_DIRTY":
+                return "WebView يحتاج إعادة تهيئة";
+            case "WEBVIEW_SINGLE_PROCESS":
+                return "WebView أحادي العملية";
+            default:
+                return code;
+        }
+    }
+
+    private void openHostRemediationStep(HostRemediationPlanner.Step step) {
+        suppressNextResumeRefresh = true;
+        SettingsNavigator.fixHostStep(this, step);
     }
 
     private void fixMostImportant() {
         HostRemediationPlanner.Step hostStep = lastHostRemediationStep;
         if (hostStep != null) {
-            SettingsNavigator.fixHostStep(this, hostStep);
+            openHostRemediationStep(hostStep);
             return;
         }
 
