@@ -57,7 +57,7 @@ jobs:
       - name: Align and sign release APK
         run: |
           IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          OUT=app/build/outputs/apk/release/FixHUA-v2.1.0.apk
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
@@ -69,20 +69,22 @@ jobs:
 
       - name: Verify APK identity, signature, and permission surface
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          APK=app/build/outputs/apk/release/FixHUA-v2.1.0.apk
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/apk-badging.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
-          grep -q "package: name='com.fixhua.guard' versionCode='20' versionName='2.0.0'" app/build/outputs/apk/release/apk-badging.txt
+          grep -q "package: name='com.fixhua.guard' versionCode='21' versionName='2.1.0'" app/build/outputs/apk/release/apk-badging.txt
           grep -q "android.permission.ACCESS_NETWORK_STATE" app/build/outputs/apk/release/apk-permissions.txt
+          grep -q "android.permission.WRITE_SECURE_SETTINGS" app/build/outputs/apk/release/apk-permissions.txt
+          grep -q "android.permission.DUMP" app/build/outputs/apk/release/apk-permissions.txt
           for forbidden in WAKE_LOCK KILL_BACKGROUND_PROCESSES FOREGROUND_SERVICE POST_NOTIFICATIONS PACKAGE_USAGE_STATS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS CHANGE_WIFI_STATE; do
             if grep -q "android.permission.$forbidden" app/build/outputs/apk/release/apk-permissions.txt; then
               echo "Forbidden legacy permission present: $forbidden"
               exit 1
             fi
           done
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-v2.1.0.apk.sha256
 
       - name: Enable KVM for Android 12 smoke test
         run: |
@@ -100,21 +102,21 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            adb install -r app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+            adb install -r app/build/outputs/apk/release/FixHUA-v2.1.0.apk
             adb logcat -c
             adb shell am force-stop com.fixhua.guard
-            adb shell am start -W -n com.fixhua.guard/.MainActivity | tee app/build/outputs/apk/release/smoke-start.txt
+            adb shell am start -W -n com.fixhua.guard/.OptimizerActivity | tee app/build/outputs/apk/release/smoke-start.txt
             sleep 4
             adb shell pidof com.fixhua.guard | grep -Eq '[0-9]+'
-            adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.MainActivity"
+            adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.OptimizerActivity"
             test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.fixhua.guard' || true)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-v2.0.0-release
+          name: FixHUA-v2.1.0-release
           path: |
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+            app/build/outputs/apk/release/FixHUA-v2.1.0.apk
+            app/build/outputs/apk/release/FixHUA-v2.1.0.apk.sha256
             app/build/outputs/apk/release/apksigner.txt
             app/build/outputs/apk/release/apk-badging.txt
             app/build/outputs/apk/release/apk-permissions.txt
