@@ -7,7 +7,7 @@ import java.util.Locale;
 final class ReportBuilder {
     static String build(SystemSnapshot s, ReadinessEngine.Result result) {
         StringBuilder out = new StringBuilder(4096);
-        out.append("FixHUA Compatibility & Stability Report v2.0\n");
+        out.append("FixHUA Compatibility & Stability Report v2.1.1\n");
         out.append("Generated: ")
                 .append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(new Date()))
                 .append('\n');
@@ -40,6 +40,7 @@ final class ReportBuilder {
         out.append("hms_core_installed=").append(s.hmsInstalled).append('\n');
         out.append("appgallery_installed=").append(s.appGalleryInstalled).append('\n');
         out.append("huawei_system_manager_installed=").append(s.huaweiSystemManagerInstalled).append('\n');
+        out.append("gbox_mode_host_microg_required=false\n");
         out.append("note_host_gsf=Host Google Services Framework is not required by FixHUA and is not treated as a failure for GBox mode.\n\n");
 
         out.append("=== POWER / THERMAL ===\n");
