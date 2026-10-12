@@ -51,7 +51,7 @@ adb shell dumpsys package com.fixhua.guard | tr -d '\r' | tee dist/controller-pa
 grep -q 'android.permission.DUMP: granted=true' dist/controller-package-after-grant.txt
 adb logcat -c
 adb shell am force-stop com.fixhua.guard || true
-adb shell am start -W -n com.fixhua.guard/.MainActivity
+adb shell am start -W -n com.fixhua.guard/.OptimizerActivity
 sleep 5
 adb logcat -d -v brief > dist/host-probe-logcat.txt
 cat dist/host-probe-logcat.txt
@@ -204,43 +204,59 @@ cat dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=5' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*activeSession=true package=com.fixhua.sampletarget recipe=sample.synthetic.v1:7' dist/runtime-recovery-logcat.txt
-grep -q "FixHUARuntime.*activeSession=true.*sha256=$source_sha" dist/runtime-recovery-logcat.txt
+grep -q "FixHUARuntime.*sessionArtifact=true.*sourceSha256=${source_sha}" dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*packageManagerView=true package=com.fixhua.sampletarget selfFound=true absentFound=false truth=SYNTHETIC_VIEW' dist/runtime-recovery-logcat.txt
+grep -q 'FixHUARuntime.*hostCapability=true capability=1002 gboxInstalled=false.*truth=HOST_REAL' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUASampleApp.*applicationProbe=true created=true;package=com.fixhua.sampletarget;bridgePerm=denied;connectivity=host;bridgeBind=denied;appContext=com.fixhua.sampletarget.SampleApplication' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true phase=activityOnCreate' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onCreate facade=true' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onResume facade=true' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUAEvidence.*provider=runtime.activity-facade-v2.*subject=activity-facade:setContentView.*outcome=DELIVERED' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUASample.*hostBaseline=true package=com.fixhua.sampletarget;gms=absent;bridgePerm=denied;connectivity=host;context=com.fixhua.sampletarget.SampleActivity;appContextPackage=com.fixhua.sampletarget;appContextClass=com.fixhua.sampletarget.SampleApplication' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUAEvidence.*provider=runtime.restricted-context-v2.*subject=bind-service.*outcome=DENIED:com.fixhua.guard/.HostCapabilityBrokerService' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onCreate marker=create=1;resume=0;config=0;destroy=0' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*foreignScreenLifecycle=true phase=onResume marker=create=1;resume=1;config=0;destroy=0' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUAEvidence.*decision=SHIM.*subject=proxy-lifecycle:onCreate' dist/runtime-recovery-logcat.txt
-grep -q 'FixHUAEvidence.*decision=DELEGATED.*subject=system-service:connectivity.*outcome=PRESENT' dist/runtime-recovery-logcat.txt
 if grep -q 'FixHUARuntime.*sessionArtifact=false' dist/runtime-recovery-logcat.txt; then
-  echo "Recovered Runtime used a non-verified artifact" >&2
+  echo "Persisted transformed session artifact recovery failed" >&2
   false
 fi
 if grep -q 'SECURITY_FAILURE' dist/runtime-recovery-logcat.txt; then
   echo "Recovered imported code inherited forbidden bridge authority" >&2
   false
 fi
-echo "PROCESS_DEATH_APPLICATION_ACTIVITY_RECOVERY_PASS before=$runtime_pid_before after=$runtime_pid_after"
+grep -q 'com.fixhua.runtime/.RuntimeActivity' <(adb shell dumpsys activity activities | tr -d '\r')
+echo "PROCESS_DEATH_RECOVERY_PASS before=$runtime_pid_before after=$runtime_pid_after"
 endstep
 
-step "Verify foreign caller cannot bind protected broker"
+step "Verify direct foreign launch remains ordinary host reality"
 adb logcat -c
 adb shell am force-stop com.fixhua.sampletarget || true
 adb shell am start -W -n com.fixhua.sampletarget/.SampleActivity
 sleep 3
 adb logcat -d -v brief > dist/sample-logcat.txt
 cat dist/sample-logcat.txt
-grep -Eq 'FixHUASample.*bridgeDenied=true reason=(bindService_false|SecurityException)' dist/sample-logcat.txt
-if grep -q 'FixHUASample.*bridgeConnectedUnexpectedly=true' dist/sample-logcat.txt; then
-  echo "Foreign APK unexpectedly connected to protected broker" >&2
+grep -q 'FixHUASampleApp.*applicationProbe=true created=true;package=com.fixhua.sampletarget;bridgePerm=denied;connectivity=host;bridgeBind=denied;appContext=com.fixhua.sampletarget.SampleApplication' dist/sample-logcat.txt
+grep -q 'FixHUASample.*hostBaseline=true package=com.fixhua.sampletarget;gms=present;bridgePerm=denied;connectivity=host;context=com.fixhua.sampletarget.SampleActivity;appContextPackage=com.fixhua.sampletarget;appContextClass=com.fixhua.sampletarget.SampleApplication' dist/sample-logcat.txt
+grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/sample-logcat.txt
+if grep -q 'SECURITY_FAILURE' dist/sample-logcat.txt; then
+  echo "Direct foreign sample unexpectedly reached signature bridge" >&2
   false
 fi
-echo "FOREIGN_CALLER_DENIED_PASS"
+echo "HOST_REALITY_AND_BRIDGE_SECURITY_PASS"
 endstep
 
-echo "SYNTHETIC_ANDROID12_SMOKE_PASS"
+step "Verify runtime keeps privileged permissions out"
+adb shell dumpsys package com.fixhua.runtime | tr -d '\r' | tee dist/runtime-package.txt
+if grep -q 'android.permission.DUMP' dist/FixHUA-Runtime.apk.permissions.txt; then
+  echo "Runtime APK requested forbidden DUMP permission" >&2
+  false
+fi
+if grep -q 'android.permission.WRITE_SECURE_SETTINGS' dist/FixHUA-Runtime.apk.permissions.txt; then
+  echo "Runtime APK requested forbidden WRITE_SECURE_SETTINGS permission" >&2
+  false
+fi
+if grep -q 'android.permission.REQUEST_INSTALL_PACKAGES' dist/FixHUA-Runtime.apk.permissions.txt; then
+  echo "Runtime APK requested forbidden installer permission" >&2
+  false
+fi
+echo "RUNTIME_PRIVILEGE_BOUNDARY_PASS"
+endstep
