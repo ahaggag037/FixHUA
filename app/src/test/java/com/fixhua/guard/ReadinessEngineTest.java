@@ -43,6 +43,26 @@ public class ReadinessEngineTest {
     }
 
     @Test
+    public void liveProcessBudgetOverrideNeedsAttention() {
+        SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .processBudget(true, true, 4, 32, 4, "")
+                .build();
+        ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
+        assertEquals(ReadinessEngine.Status.ATTENTION, result.status);
+        assertTrue(hasCode(result, "DEV_PROCESS_LIMIT_OVERRIDE"));
+    }
+
+    @Test
+    public void unknownProcessBudgetNeverInventsConflict() {
+        SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .processBudget(true, false, -1, -1, -1, "CURRENT_LIMIT_MISSING")
+                .build();
+        ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
+        assertEquals(ReadinessEngine.Status.READY, result.status);
+        assertTrue(hasCode(result, "PROCESS_BUDGET_PROBE_FAILED"));
+    }
+
+    @Test
     public void alwaysFinishActivitiesNeedsAttention() {
         SystemSnapshot snapshot = new SystemSnapshot.Builder()
                 .alwaysFinishActivities(1)
