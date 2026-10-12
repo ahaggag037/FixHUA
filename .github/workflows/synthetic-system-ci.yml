@@ -155,7 +155,12 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: bash .github/scripts/synthetic-emulator-smoke.sh
+          script: |
+            mkdir -p dist
+            adb shell dumpsys activity settings | tr -d '\r' > dist/am-settings-shell-baseline.txt
+            grep -E 'mOverrideMaxCachedProcesses|mCustomizedMaxCachedProcesses|max_cached_processes|CUR_MAX_CACHED_PROCESSES' \
+              dist/am-settings-shell-baseline.txt | tee dist/am-settings-shell-budget-lines.txt || true
+            bash .github/scripts/synthetic-emulator-smoke.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
