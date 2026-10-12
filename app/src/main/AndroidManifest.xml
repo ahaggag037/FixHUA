@@ -7,6 +7,14 @@
         android:protectionLevel="signature" />
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Optional development bootstrap permissions. FixHUA remains usable without them. -->
     <uses-permission
@@ -66,6 +74,15 @@
             android:name=".HostCapabilityBrokerService"
             android:exported="true"
             android:permission="com.fixhua.guard.permission.RUNTIME_BRIDGE" />
+
+        <service
+            android:name=".ActiveGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Explicit user-started GBox stability session using bounded reversible CPU and Wi-Fi performance locks with thermal backoff" />
+        </service>
     </application>
 
 </manifest>
