@@ -70,7 +70,7 @@ final class RepairEngine {
                 default:
                     return new Result(Outcome.NOT_SUPPORTED, "لا يوجد تغيير تلقائي آمن لهذه المشكلة.");
             }
-        } catch (SecurityException | RuntimeException failure) {
+        } catch (RuntimeException failure) {
             return new Result(
                     Outcome.FAILED,
                     failure.getClass().getSimpleName() + ": " + String.valueOf(failure.getMessage()));
