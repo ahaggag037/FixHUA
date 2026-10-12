@@ -204,7 +204,7 @@ cat dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationReady=true' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*bridgeAuthenticated=true protocol=5' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*activeSession=true package=com.fixhua.sampletarget recipe=sample.synthetic.v1:7' dist/runtime-recovery-logcat.txt
-grep -q "FixHUARuntime.*activeSession=true.*sourceSha256=$source_sha" dist/runtime-recovery-logcat.txt
+grep -q "FixHUARuntime.*activeSession=true.*sha256=$source_sha" dist/runtime-recovery-logcat.txt
 grep -q 'FixHUASampleApp.*applicationProbe=true created=true;package=com.fixhua.sampletarget;bridgePerm=denied;connectivity=host;bridgeBind=denied;appContext=com.fixhua.sampletarget.SampleApplication' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntimeLifecycle.*applicationInvariant=true phase=activityOnCreate' dist/runtime-recovery-logcat.txt
 grep -q 'FixHUARuntime.*ordinaryActivityLifecycle=true phase=onCreate facade=true' dist/runtime-recovery-logcat.txt
