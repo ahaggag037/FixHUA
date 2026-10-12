@@ -45,6 +45,11 @@ final class ProcessBudgetImportStore {
         return payload.isValid() ? new Stored(payload, capturedAt) : null;
     }
 
+    /** Drop a previously imported snapshot before a change that can alter the process limit. */
+    static void invalidate(Context context) {
+        prefs(context).edit().clear().apply();
+    }
+
     private static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
