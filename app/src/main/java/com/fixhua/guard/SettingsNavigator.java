@@ -9,6 +9,8 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.Settings;
 
+import com.fixhua.core.HostRemediationPlanner;
+
 final class SettingsNavigator {
 
     static boolean launchGBox(Context context) {
@@ -86,6 +88,14 @@ final class SettingsNavigator {
         );
     }
 
+    static void openWebViewSettings(Context context) {
+        startSafely(
+                context,
+                new Intent(Settings.ACTION_WEBVIEW_SETTINGS),
+                new Intent(Settings.ACTION_SETTINGS)
+        );
+    }
+
     static void openStorageSettings(Context context) {
         startSafely(
                 context,
@@ -108,6 +118,21 @@ final class SettingsNavigator {
                 new Intent(Settings.ACTION_DATE_SETTINGS),
                 new Intent(Settings.ACTION_SETTINGS)
         );
+    }
+
+    static void fixHostStep(Context context, HostRemediationPlanner.Step step) {
+        if (step == null || !step.actionable()) return;
+        switch (step.action()) {
+            case OPEN_DEVELOPER_OPTIONS:
+                openDeveloperOptions(context);
+                break;
+            case OPEN_WEBVIEW_SETTINGS:
+                openWebViewSettings(context);
+                break;
+            case OBSERVE_ONLY:
+            default:
+                break;
+        }
     }
 
     static void fixFinding(Context context, ReadinessEngine.Finding finding) {
