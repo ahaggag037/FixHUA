@@ -51,7 +51,7 @@ public final class ProcessBudgetImportActivity extends Activity {
             return;
         }
 
-        Intent main = new Intent(this, MainActivity.class)
+        Intent main = new Intent(this, OptimizerActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(main);
         finish();
