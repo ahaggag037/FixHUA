@@ -214,9 +214,20 @@ final class SystemSnapshot {
                     b.networkWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
                     b.networkVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
                 }
-                b.networkMetered = cm.isActiveNetworkMetered();
             } catch (RuntimeException ignored) {
                 b.networkPresent = false;
+                b.networkInternetCapable = false;
+                b.networkValidated = false;
+                b.networkWifi = false;
+                b.networkVpn = false;
+            }
+            // Huawei builds can throw from this secondary query even after active
+            // network capabilities were read successfully. Keep metered state
+            // independent so it cannot corrupt the validated-network result.
+            try {
+                b.networkMetered = cm.isActiveNetworkMetered();
+            } catch (RuntimeException ignored) {
+                b.networkMetered = false;
             }
         }
 
@@ -377,6 +388,13 @@ final class SystemSnapshot {
 
         Builder gboxInstalled(boolean value) { gboxInstalled = value; return this; }
         Builder networkValidated(boolean value) { networkValidated = value; return this; }
+        Builder network(boolean present, boolean internetCapable, boolean validated, boolean wifi) {
+            networkPresent = present;
+            networkInternetCapable = internetCapable;
+            networkValidated = validated;
+            networkWifi = wifi;
+            return this;
+        }
         Builder powerSaveMode(boolean value) { powerSaveMode = value; return this; }
         Builder gboxBatteryExempt(boolean value) { gboxBatteryExempt = value; return this; }
         Builder lowMemory(boolean value) { lowMemory = value; return this; }
