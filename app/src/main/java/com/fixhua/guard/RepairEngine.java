@@ -9,7 +9,7 @@ import android.provider.Settings;
 final class RepairEngine {
     enum Outcome {
         APPLIED,
-        NEEDS_DEVELOPER_OPTIONS,
+        NEEDS_ACCESSIBILITY,
         NEEDS_SETTINGS,
         NOT_SUPPORTED,
         FAILED
@@ -29,7 +29,7 @@ final class RepairEngine {
                 case "ALWAYS_FINISH_ACTIVITIES":
                     if (!hasWriteSecureSettings(context)) {
                         return new Result(
-                                Outcome.NEEDS_DEVELOPER_OPTIONS,
+                                Outcome.NEEDS_ACCESSIBILITY,
                                 "إيقاف Don't keep activities يحتاج Developer options أو صلاحية WRITE_SECURE_SETTINGS.");
                     }
                     if (!Settings.Global.putInt(
@@ -57,7 +57,7 @@ final class RepairEngine {
 
                 case "DEV_PROCESS_LIMIT_OVERRIDE":
                     return new Result(
-                            Outcome.NEEDS_DEVELOPER_OPTIONS,
+                            Outcome.NEEDS_ACCESSIBILITY,
                             "حد عمليات الخلفية محمي بخدمة ActivityManager؛ يجب تغييره من Developer options إلى Standard limit.");
 
                 case "POWER_SAVE":
