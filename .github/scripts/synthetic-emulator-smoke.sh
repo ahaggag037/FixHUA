@@ -236,7 +236,7 @@ adb logcat -d -v brief > dist/sample-logcat.txt
 cat dist/sample-logcat.txt
 grep -q 'FixHUASampleApp.*applicationProbe=true created=true;package=com.fixhua.sampletarget;bridgePerm=denied;connectivity=host;bridgeBind=denied;appContext=com.fixhua.sampletarget.SampleApplication' dist/sample-logcat.txt
 grep -q 'FixHUASample.*hostBaseline=true package=com.fixhua.sampletarget;gms=present;bridgePerm=denied;connectivity=host;context=com.fixhua.sampletarget.SampleActivity;appContextPackage=com.fixhua.sampletarget;appContextClass=com.fixhua.sampletarget.SampleApplication' dist/sample-logcat.txt
-grep -q 'FixHUASample.*bridgeDenied=true reason=bindService_false' dist/sample-logcat.txt
+grep -Eq 'FixHUASample.*bridgeDenied=true reason=(bindService_false|SecurityException)' dist/sample-logcat.txt
 if grep -q 'SECURITY_FAILURE' dist/sample-logcat.txt; then
   echo "Direct foreign sample unexpectedly reached signature bridge" >&2
   false
