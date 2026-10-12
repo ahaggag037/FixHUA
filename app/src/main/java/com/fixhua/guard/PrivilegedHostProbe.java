@@ -14,14 +14,13 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Optional P2 read-only host probe.
+ * Optional process-budget probe.
  *
- * <p>This class has no free-form command surface. When the user has explicitly bootstrapped the
- * platform development permission {@code android.permission.DUMP}, it runs exactly one fixed
- * command: {@code /system/bin/dumpsys activity settings}. Raw output is redirected to an
- * app-private temporary file, bounded, parsed for process-budget integers, then deleted. Only
- * fixed-key presence flags, parsed integers, output size and fixed error categories are logged;
- * arbitrary dumpsys text is never logged or persisted.</p>
+ * <p>FixHUA first consumes a fresh, sanitized four-integer snapshot imported by adb/hdb shell
+ * through a DUMP-protected Activity. This is the reliable path on stock Android where SELinux may
+ * deny a third-party app process from executing dumpsys even after the development DUMP permission
+ * appears granted. A direct fixed-command probe remains only as a bounded best-effort fallback.
+ * Raw dumpsys output is never persisted by the import path and is deleted after the direct path.</p>
  */
 final class PrivilegedHostProbe {
     private static final String TAG = "FixHUAHostProbe";
@@ -55,7 +54,24 @@ final class PrivilegedHostProbe {
 
     static Result capture(Context context) {
         Context app = context.getApplicationContext();
-        if (app.checkSelfPermission(Manifest.permission.DUMP) != PackageManager.PERMISSION_GRANTED) {
+        boolean dumpGranted = app.checkSelfPermission(Manifest.permission.DUMP)
+                == PackageManager.PERMISSION_GRANTED;
+
+        ProcessBudgetImportStore.Stored imported =
+                ProcessBudgetImportStore.loadFresh(app, System.currentTimeMillis());
+        if (imported != null) {
+            ActivityManagerSettingsParser.ProcessBudget budget = imported.payload().toProcessBudget();
+            Log.i(TAG,
+                    "dumpPermission=" + dumpGranted
+                            + " probeSuccess=true source=ADB_SHELL_SANITIZED"
+                            + " current=" + budget.currentMaxCachedProcesses()
+                            + " reference=" + budget.referenceMaxCachedProcesses()
+                            + " override=" + budget.overrideMaxCachedProcesses()
+                            + " conflict=" + budget.hasNonStandardOverride());
+            return new Result(dumpGranted, true, budget, "");
+        }
+
+        if (!dumpGranted) {
             Log.i(TAG, "dumpPermission=false probeSuccess=false reason=DUMP_NOT_GRANTED");
             return Result.permissionMissing();
         }
@@ -112,7 +128,7 @@ final class PrivilegedHostProbe {
             }
 
             Log.i(TAG,
-                    "dumpPermission=true probeSuccess=true current="
+                    "dumpPermission=true probeSuccess=true source=DIRECT_FIXED_DUMPSYS current="
                             + budget.currentMaxCachedProcesses()
                             + " reference=" + budget.referenceMaxCachedProcesses()
                             + " override=" + budget.overrideMaxCachedProcesses()
@@ -127,7 +143,6 @@ final class PrivilegedHostProbe {
         } finally {
             if (process != null && process.isAlive()) process.destroyForcibly();
             if (raw != null && raw.exists() && !raw.delete()) {
-                // Raw dump remains only in app-private cache if deletion unexpectedly fails.
                 raw.deleteOnExit();
             }
         }
