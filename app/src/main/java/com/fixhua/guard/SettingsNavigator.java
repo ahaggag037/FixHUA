@@ -146,6 +146,7 @@ final class SettingsNavigator {
                     openBatteryOptimizationSettings(context);
                 }
                 break;
+            case "DEV_PROCESS_LIMIT_OVERRIDE":
             case "ALWAYS_FINISH_ACTIVITIES":
                 openDeveloperOptions(context);
                 break;
