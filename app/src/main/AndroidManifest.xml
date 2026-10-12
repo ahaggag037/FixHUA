@@ -7,7 +7,8 @@
         android:protectionLevel="signature" />
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Optional P2 bootstrap: never granted automatically; user/admin may grant with adb/hdb pm grant. -->
+    <!-- Optional legacy direct-probe bootstrap. The reliable R15 path is the DUMP-protected
+         shell import Activity below; no raw dumpsys text crosses into FixHUA. -->
     <uses-permission
         android:name="android.permission.DUMP"
         tools:ignore="ProtectedPermissions" />
@@ -40,6 +41,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ProcessBudgetImportActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
 
         <activity
             android:name=".AcceptanceBootstrapActivity"
