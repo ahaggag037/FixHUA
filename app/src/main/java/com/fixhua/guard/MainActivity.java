@@ -14,6 +14,7 @@ import com.fixhua.core.BugreportAnalyzer;
 import com.fixhua.core.HostDoctor;
 import com.fixhua.core.HostFixVerification;
 import com.fixhua.core.HostRemediationPlanner;
+import com.fixhua.core.HostVerificationReport;
 import com.fixhua.core.HostVerificationSnapshot;
 import com.fixhua.core.SyntheticPackageRecord;
 
@@ -34,6 +35,7 @@ public final class MainActivity extends Activity {
     private static final String EXTRA_PLAN_DIGEST = "com.fixhua.runtime.extra.PLAN_DIGEST";
     private static final String HOST_VERIFY_PREFS = "fixhua_host_verification";
     private static final String HOST_VERIFY_SNAPSHOT = "last_sanitized_snapshot";
+    private static final String HOST_VERIFY_PREVIOUS_SNAPSHOT = "previous_sanitized_snapshot";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicInteger refreshGeneration = new AtomicInteger();
@@ -305,7 +307,9 @@ public final class MainActivity extends Activity {
                         : new HostFixVerification().compare(
                                 previousVerificationSnapshot,
                                 currentVerificationSnapshot);
-                saveHostVerificationSnapshot(currentVerificationSnapshot);
+                saveHostVerificationSnapshots(
+                        previousVerificationSnapshot,
+                        currentVerificationSnapshot);
 
                 String text = formatBugreportResult(report, remediationPlan, verification);
                 HostRemediationPlanner.Step nextStep = remediationPlan.firstActionable();
@@ -355,22 +359,35 @@ public final class MainActivity extends Activity {
     }
 
     private HostVerificationSnapshot loadHostVerificationSnapshot() {
+        return loadHostVerificationSnapshot(HOST_VERIFY_SNAPSHOT);
+    }
+
+    private HostVerificationSnapshot loadPreviousHostVerificationSnapshot() {
+        return loadHostVerificationSnapshot(HOST_VERIFY_PREVIOUS_SNAPSHOT);
+    }
+
+    private HostVerificationSnapshot loadHostVerificationSnapshot(String key) {
         SharedPreferences prefs = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE);
-        String encoded = prefs.getString(HOST_VERIFY_SNAPSHOT, null);
+        String encoded = prefs.getString(key, null);
         if (encoded == null || encoded.isBlank()) return null;
         try {
             return HostVerificationSnapshot.decode(encoded);
         } catch (IllegalArgumentException invalid) {
-            prefs.edit().remove(HOST_VERIFY_SNAPSHOT).apply();
+            prefs.edit().remove(key).apply();
             return null;
         }
     }
 
-    private void saveHostVerificationSnapshot(HostVerificationSnapshot snapshot) {
-        getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE)
-                .edit()
-                .putString(HOST_VERIFY_SNAPSHOT, snapshot.encode())
-                .apply();
+    private void saveHostVerificationSnapshots(
+            HostVerificationSnapshot previous,
+            HostVerificationSnapshot current) {
+        SharedPreferences.Editor editor = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE).edit();
+        if (previous == null) {
+            editor.remove(HOST_VERIFY_PREVIOUS_SNAPSHOT);
+        } else {
+            editor.putString(HOST_VERIFY_PREVIOUS_SNAPSHOT, previous.encode());
+        }
+        editor.putString(HOST_VERIFY_SNAPSHOT, current.encode()).apply();
     }
 
     private static String formatBugreportResult(
@@ -635,17 +652,29 @@ public final class MainActivity extends Activity {
         executor.execute(() -> {
             SystemSnapshot snapshot = SystemSnapshot.capture(getApplicationContext());
             ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
-            String report = ReportBuilder.build(snapshot, result);
+            StringBuilder report = new StringBuilder(ReportBuilder.build(snapshot, result));
+
+            HostVerificationSnapshot current = loadHostVerificationSnapshot();
+            if (current != null) {
+                HostVerificationSnapshot previous = loadPreviousHostVerificationSnapshot();
+                HostFixVerification.Result comparison = previous == null
+                        ? null
+                        : new HostFixVerification().compare(previous, current);
+                report.append("\n\n=== SANITIZED BUGREPORT VERIFICATION ===\n")
+                        .append(HostVerificationReport.render(current, comparison));
+            }
+
+            String reportText = report.toString();
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 Intent share = new Intent(Intent.ACTION_SEND)
                         .setType("text/plain")
-                        .putExtra(Intent.EXTRA_SUBJECT, "FixHUA v2.1 report")
-                        .putExtra(Intent.EXTRA_TEXT, report);
+                        .putExtra(Intent.EXTRA_SUBJECT, "FixHUA v2.2 report")
+                        .putExtra(Intent.EXTRA_TEXT, reportText);
                 try {
                     startActivity(Intent.createChooser(share, "مشاركة تقرير FixHUA"));
                 } catch (RuntimeException e) {
-                    findingsView.setText(report);
+                    findingsView.setText(reportText);
                     Toast.makeText(this, "لا يوجد تطبيق مشاركة؛ تم عرض التقرير داخل FixHUA", Toast.LENGTH_LONG).show();
                 }
             });
