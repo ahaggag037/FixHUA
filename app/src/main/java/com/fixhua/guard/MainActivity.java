@@ -11,6 +11,7 @@ import android.widget.Toast;
 
 import com.fixhua.core.BugreportAnalyzer;
 import com.fixhua.core.HostDoctor;
+import com.fixhua.core.HostRemediationPlanner;
 import com.fixhua.core.SyntheticPackageRecord;
 
 import java.io.InputStream;
@@ -38,6 +39,7 @@ public final class MainActivity extends Activity {
 
     private volatile SystemSnapshot lastSnapshot;
     private volatile ReadinessEngine.Result lastResult;
+    private volatile HostRemediationPlanner.Step lastHostRemediationStep;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -92,6 +94,7 @@ public final class MainActivity extends Activity {
     }
 
     private void refresh(boolean userRequested) {
+        lastHostRemediationStep = null;
         final int generation = refreshGeneration.incrementAndGet();
         summaryView.setText("جاري فحص الجهاز…");
         executor.execute(() -> {
@@ -278,19 +281,39 @@ public final class MainActivity extends Activity {
                 List<HostDoctor.Finding> hostFindings = doctor.evaluate(
                         report.toHostProfile(),
                         new HostDoctor.RuntimeBudget("observed-gbox", observedProcesses));
-                String text = formatBugreportResult(report, hostFindings);
+                HostRemediationPlanner.Plan remediationPlan =
+                        new HostRemediationPlanner().plan(hostFindings);
+                String text = formatBugreportResult(report, remediationPlan);
+                HostRemediationPlanner.Step nextStep = remediationPlan.firstActionable();
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
+                    lastHostRemediationStep = nextStep;
                     findingsView.setText(text);
-                    new AlertDialog.Builder(this)
+                    fixNextButton.setEnabled(nextStep != null);
+                    fixNextButton.setText(nextStep == null
+                            ? "لا يوجد إصلاح آمن مباشر من التقرير"
+                            : "إصلاح أهم مشكلة من التقرير");
+
+                    AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                             .setTitle("تحليل Bug Report اكتمل")
-                            .setMessage("تم استخراج حقائق التوافق محليًا فقط. لم يتم رفع الملف ولم يحتفظ FixHUA بالسجلات الخام.")
-                            .setPositiveButton("حسنًا", null)
-                            .show();
+                            .setMessage(nextStep == null
+                                    ? "تم استخراج حقائق التوافق محليًا فقط. لا يوجد إجراء إعدادات آمن يمكن لـFixHUA اقتراحه مباشرة من هذه النتائج."
+                                    : "تم إنشاء خطة إصلاح مرتبة حسب الأولوية. الخطوة الأولى: "
+                                            + nextStep.recommendedAction())
+                            .setNegativeButton("إغلاق", null);
+                    if (nextStep != null) {
+                        dialog.setPositiveButton(
+                                "فتح الإعداد المطلوب",
+                                (d, which) -> SettingsNavigator.fixHostStep(this, nextStep));
+                    } else {
+                        dialog.setPositiveButton("حسنًا", null);
+                    }
+                    dialog.show();
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
+                    lastHostRemediationStep = null;
                     findingsView.setText("تعذر تحليل Bug Report:\n" + e.getClass().getSimpleName()
                             + ": " + String.valueOf(e.getMessage()));
                 });
@@ -300,7 +323,7 @@ public final class MainActivity extends Activity {
 
     private static String formatBugreportResult(
             BugreportAnalyzer.Result report,
-            List<HostDoctor.Finding> hostFindings) {
+            HostRemediationPlanner.Plan remediationPlan) {
         StringBuilder text = new StringBuilder();
         text.append("نتائج Full Bug Report:\n\n");
 
@@ -326,13 +349,17 @@ public final class MainActivity extends Activity {
             text.append('\n');
         }
 
-        if (!hostFindings.isEmpty()) {
-            text.append("\nHost Doctor:\n");
-            for (HostDoctor.Finding finding : hostFindings) {
-                String marker = finding.severity() == HostDoctor.Severity.HIGH ? "⛔"
-                        : finding.severity() == HostDoctor.Severity.WARNING ? "⚠" : "ℹ";
-                text.append(marker).append(' ').append(finding.summary()).append('\n');
-                text.append("  ↳ ").append(finding.recommendedAction()).append('\n');
+        if (!remediationPlan.steps().isEmpty()) {
+            text.append("\nخطة الإصلاح حسب الأولوية:\n");
+            int index = 1;
+            for (HostRemediationPlanner.Step step : remediationPlan.steps()) {
+                String marker = step.severity() == HostDoctor.Severity.HIGH ? "⛔"
+                        : step.severity() == HostDoctor.Severity.WARNING ? "⚠" : "ℹ";
+                text.append(index++).append(". ").append(marker).append(' ')
+                        .append(step.summary()).append('\n');
+                text.append("  ↳ ").append(step.recommendedAction());
+                if (!step.actionable()) text.append(" [ملاحظة فقط — لا تغيير تلقائي]");
+                text.append('\n');
             }
         }
 
@@ -343,6 +370,12 @@ public final class MainActivity extends Activity {
     }
 
     private void fixMostImportant() {
+        HostRemediationPlanner.Step hostStep = lastHostRemediationStep;
+        if (hostStep != null) {
+            SettingsNavigator.fixHostStep(this, hostStep);
+            return;
+        }
+
         ReadinessEngine.Result result = lastResult;
         if (result == null) {
             refresh(true);
