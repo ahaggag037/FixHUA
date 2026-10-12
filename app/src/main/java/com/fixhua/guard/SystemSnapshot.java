@@ -76,6 +76,13 @@ final class SystemSnapshot {
     final int autoTime;
     final int autoTimeZone;
 
+    final boolean dumpPermissionGranted;
+    final boolean privilegedProcessProbeSuccess;
+    final int currentMaxCachedProcesses;
+    final int referenceMaxCachedProcesses;
+    final int overrideMaxCachedProcesses;
+    final String privilegedProcessProbeFailure;
+
     private SystemSnapshot(Builder b) {
         gboxInstalled = b.gboxInstalled;
         gboxVersion = b.gboxVersion;
@@ -118,6 +125,12 @@ final class SystemSnapshot {
         alwaysFinishActivities = b.alwaysFinishActivities;
         autoTime = b.autoTime;
         autoTimeZone = b.autoTimeZone;
+        dumpPermissionGranted = b.dumpPermissionGranted;
+        privilegedProcessProbeSuccess = b.privilegedProcessProbeSuccess;
+        currentMaxCachedProcesses = b.currentMaxCachedProcesses;
+        referenceMaxCachedProcesses = b.referenceMaxCachedProcesses;
+        overrideMaxCachedProcesses = b.overrideMaxCachedProcesses;
+        privilegedProcessProbeFailure = b.privilegedProcessProbeFailure;
     }
 
     static SystemSnapshot capture(Context context) {
@@ -221,6 +234,14 @@ final class SystemSnapshot {
         b.alwaysFinishActivities = readGlobalInt(app, Settings.Global.ALWAYS_FINISH_ACTIVITIES);
         b.autoTime = readGlobalInt(app, Settings.Global.AUTO_TIME);
         b.autoTimeZone = readGlobalInt(app, Settings.Global.AUTO_TIME_ZONE);
+
+        PrivilegedHostProbe.Result privilegedProbe = PrivilegedHostProbe.capture(app);
+        b.dumpPermissionGranted = privilegedProbe.dumpPermissionGranted();
+        b.privilegedProcessProbeSuccess = privilegedProbe.success();
+        b.privilegedProcessProbeFailure = privilegedProbe.failureReason();
+        b.currentMaxCachedProcesses = privilegedProbe.processBudget().currentMaxCachedProcesses();
+        b.referenceMaxCachedProcesses = privilegedProbe.processBudget().referenceMaxCachedProcesses();
+        b.overrideMaxCachedProcesses = privilegedProbe.processBudget().overrideMaxCachedProcesses();
 
         Intent battery = app.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (battery != null) {
@@ -347,6 +368,12 @@ final class SystemSnapshot {
         int alwaysFinishActivities = 0;
         int autoTime = 1;
         int autoTimeZone = 1;
+        boolean dumpPermissionGranted = false;
+        boolean privilegedProcessProbeSuccess = false;
+        int currentMaxCachedProcesses = -1;
+        int referenceMaxCachedProcesses = -1;
+        int overrideMaxCachedProcesses = -1;
+        String privilegedProcessProbeFailure = "DUMP_NOT_GRANTED";
 
         Builder gboxInstalled(boolean value) { gboxInstalled = value; return this; }
         Builder networkValidated(boolean value) { networkValidated = value; return this; }
@@ -363,6 +390,15 @@ final class SystemSnapshot {
         Builder microgInstalled(boolean value) { microgInstalled = value; return this; }
         Builder identityConflict(boolean value) { identityConflict = value; return this; }
         Builder huaweiEnvironment(boolean value) { huaweiEnvironment = value; return this; }
+        Builder processBudget(boolean granted, boolean success, int current, int reference, int override, String failure) {
+            dumpPermissionGranted = granted;
+            privilegedProcessProbeSuccess = success;
+            currentMaxCachedProcesses = current;
+            referenceMaxCachedProcesses = reference;
+            overrideMaxCachedProcesses = override;
+            privilegedProcessProbeFailure = failure;
+            return this;
+        }
 
         SystemSnapshot build() { return new SystemSnapshot(this); }
     }
