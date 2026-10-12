@@ -10,7 +10,6 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -19,7 +18,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,10 +32,8 @@ public final class OptimizerActivity extends Activity {
     private TextView findingsView;
     private TextView actionView;
     private Button repairButton;
-    private Button helperButton;
+    private Button advancedModeButton;
 
-    private volatile SystemSnapshot lastSnapshot;
-    private volatile ReadinessEngine.Result lastResult;
     private String pendingFindingCode;
     private boolean returningFromRepair;
     private boolean firstResume = true;
@@ -90,7 +86,7 @@ public final class OptimizerActivity extends Activity {
         root.addView(title, matchWrap());
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("تحسين استقرار GBox على Huawei — إصلاح + تحقق، وليس مجرد روابط إعدادات");
+        subtitle.setText("تحسين استقرار GBox على Huawei — تنفيذ آمن + تحقق بعد كل خطوة");
         subtitle.setTextSize(14f);
         subtitle.setGravity(Gravity.CENTER);
         subtitle.setPadding(0, dp(6), 0, dp(14));
@@ -112,16 +108,16 @@ public final class OptimizerActivity extends Activity {
         launch.setOnClickListener(v -> launchGboxWithFreshCheck());
         root.addView(launch, matchWrapTop());
 
-        helperButton = button("تفعيل مساعد الإصلاح التلقائي");
-        helperButton.setOnClickListener(v -> showHelperDialog());
-        root.addView(helperButton, matchWrapTop());
+        advancedModeButton = button("الوضع المتقدم (ADB اختياري)");
+        advancedModeButton.setOnClickListener(v -> showAdvancedModeDialog());
+        root.addView(advancedModeButton, matchWrapTop());
 
-        Button advanced = button("التشخيص المتقدم / Bug Report / Runtime");
-        advanced.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)));
-        root.addView(advanced, matchWrapTop());
+        Button advancedDiagnostics = button("التشخيص المتقدم / Bug Report / Runtime");
+        advancedDiagnostics.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)));
+        root.addView(advancedDiagnostics, matchWrapTop());
 
         actionView = cardText(15f, true);
-        actionView.setText("سيعرض FixHUA هنا ما نفذه وما إذا تم التحقق منه.");
+        actionView.setText("سيعرض FixHUA هنا ما تم تنفيذه وهل نجح التحقق بعده.");
         actionView.setPadding(dp(12), dp(14), dp(12), dp(14));
         root.addView(actionView, matchWrapLargeTop());
 
@@ -131,7 +127,7 @@ public final class OptimizerActivity extends Activity {
         root.addView(findingsView, matchWrapLargeTop());
 
         TextView note = new TextView(this);
-        note.setText("الوضع العادي لا يغيّر إعدادات محمية بصمت. مساعد إمكانية الوصول ينفذ فقط إصلاحات Developer options التي طلبتها أنت، ثم يتوقف. الوضع المتقدم عبر ADB اختياري ويتيح تغييرات آمنة يمكن التحقق منها داخل التطبيق.");
+        note.setText("FixHUA لا يدّعي أنه غيّر إعدادًا محميًا إذا لم يستطع. التغييرات التي تسمح بها صلاحياته تُنفّذ مباشرة وتُفحص بعدها. الإعدادات التي يحميها Android تُفتح في المكان الصحيح، ثم يعيد FixHUA الفحص عند رجوعك ليثبت هل تغيرت فعلاً.");
         note.setTextSize(13f);
         note.setPadding(0, dp(16), 0, dp(24));
         root.addView(note, matchWrap());
@@ -144,15 +140,10 @@ public final class OptimizerActivity extends Activity {
         executor.execute(() -> {
             SystemSnapshot snapshot = SystemSnapshot.capture(getApplicationContext());
             ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
-            String accessibilityOutcome = verifyPending
-                    ? SafeRepairAccessibilityService.consumeOutcome(getApplicationContext())
-                    : null;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || token != generation.get()) return;
-                lastSnapshot = snapshot;
-                lastResult = result;
                 render(snapshot, result);
-                if (verifyPending) verifyPendingRepair(snapshot, result, accessibilityOutcome);
+                if (verifyPending) verifyPendingRepair(snapshot, result);
                 if (userRequested) Toast.makeText(this, "تم الفحص من جديد", Toast.LENGTH_SHORT).show();
             });
         });
@@ -161,7 +152,6 @@ public final class OptimizerActivity extends Activity {
     private void render(SystemSnapshot s, ReadinessEngine.Result result) {
         String status = result.status == ReadinessEngine.Status.READY ? "جاهز"
                 : result.status == ReadinessEngine.Status.BLOCKED ? "غير جاهز" : "يحتاج ضبط";
-        boolean helper = SafeRepairAccessibilityService.isEnabled(this);
         boolean secure = RepairEngine.hasWriteSecureSettings(this);
 
         StringBuilder summary = new StringBuilder();
@@ -175,8 +165,7 @@ public final class OptimizerActivity extends Activity {
             summary.append("حد العمليات: ").append(s.currentMaxCachedProcesses)
                     .append(" / المرجع ").append(s.referenceMaxCachedProcesses).append('\n');
         }
-        summary.append("مساعد الإصلاح: ").append(helper ? "فعال" : "غير مفعل").append('\n');
-        summary.append("صلاحية الإصلاح المتقدم: ").append(secure ? "مفعلة" : "غير مفعلة");
+        summary.append("الإصلاح المباشر المتقدم: ").append(secure ? "مفعل" : "غير مفعل");
         statusView.setText(summary.toString());
 
         StringBuilder findings = new StringBuilder();
@@ -197,7 +186,7 @@ public final class OptimizerActivity extends Activity {
         ReadinessEngine.Finding next = pickBestFinding(result);
         repairButton.setEnabled(next != null);
         repairButton.setText(next == null ? "لا توجد مشكلة تحتاج إصلاحًا" : "إصلاح: " + shortLabel(next.code));
-        helperButton.setText(helper ? "مساعد الإصلاح التلقائي: فعال" : "تفعيل مساعد الإصلاح التلقائي");
+        advancedModeButton.setText(secure ? "الوضع المتقدم: مفعل" : "الوضع المتقدم (ADB اختياري)");
     }
 
     private void smartRepair() {
@@ -208,20 +197,18 @@ public final class OptimizerActivity extends Activity {
             ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || token != generation.get()) return;
-                lastSnapshot = snapshot;
-                lastResult = result;
                 render(snapshot, result);
                 ReadinessEngine.Finding finding = pickBestFinding(result);
                 if (finding == null) {
                     actionView.setText("✓ لا يوجد إصلاح ضروري الآن حسب الفحص الحالي.");
                     return;
                 }
-                startRepair(snapshot, finding);
+                startRepair(finding);
             });
         });
     }
 
-    private void startRepair(SystemSnapshot before, ReadinessEngine.Finding finding) {
+    private void startRepair(ReadinessEngine.Finding finding) {
         if ("GBOX_MISSING".equals(finding.code)) {
             actionView.setText("⛔ GBox غير مثبت؛ لا يوجد تغيير محلي يستطيع FixHUA تنفيذه قبل تثبيته.");
             return;
@@ -236,25 +223,13 @@ public final class OptimizerActivity extends Activity {
                 break;
 
             case NEEDS_ACCESSIBILITY:
-                if (SafeRepairAccessibilityService.isEnabled(this)) {
-                    if ("DEV_PROCESS_LIMIT_OVERRIDE".equals(finding.code)) {
-                        ProcessBudgetImportStore.invalidate(this);
-                    }
-                    pendingFindingCode = finding.code;
-                    SafeRepairAccessibilityService.request(this, finding.code);
-                    returningFromRepair = true;
-                    actionView.setText("بدأ إصلاح " + shortLabel(finding.code)
-                            + ". سينفذ المساعد التغيير داخل Developer options فقط، ثم سأتحقق عند العودة.");
-                    SettingsNavigator.openDeveloperOptions(this);
-                } else {
-                    showAccessibilityRequired(finding.code);
-                }
+                showProtectedDeveloperRepair(finding);
                 break;
 
             case NEEDS_SETTINGS:
                 pendingFindingCode = finding.code;
                 returningFromRepair = true;
-                actionView.setText("فتح FixHUA صفحة النظام المطلوبة. بعد التعديل والعودة سأعيد الفحص تلقائيًا.");
+                actionView.setText("فتحت صفحة النظام المطلوبة. بعد تنفيذ التغيير والرجوع سأعيد الفحص تلقائيًا.");
                 SettingsNavigator.fixFinding(this, finding);
                 break;
 
@@ -264,66 +239,67 @@ public final class OptimizerActivity extends Activity {
 
             case NOT_SUPPORTED:
             default:
-                actionView.setText("لا يوجد إصلاح تلقائي آمن لهذه الحالة. " + direct.message());
+                actionView.setText("لا يوجد تغيير تلقائي آمن لهذه الحالة. " + direct.message());
+                SettingsNavigator.fixFinding(this, finding);
                 break;
         }
     }
 
-    private void verifyPendingRepair(
-            SystemSnapshot snapshot,
-            ReadinessEngine.Result result,
-            String accessibilityOutcome) {
+    private void showProtectedDeveloperRepair(ReadinessEngine.Finding finding) {
+        String instruction;
+        if ("DEV_PROCESS_LIMIT_OVERRIDE".equals(finding.code)) {
+            instruction = "غيّر Background process limit إلى Standard limit. هذه هي المشكلة التي ظهر أنها تقلل ميزانية عمليات GBox.";
+        } else if ("ALWAYS_FINISH_ACTIVITIES".equals(finding.code)) {
+            instruction = "أوقف Don't keep activities.";
+        } else {
+            instruction = "عدّل الإعداد المشار إليه ثم ارجع إلى FixHUA.";
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("إعداد يحميه Android")
+                .setMessage(instruction + "\n\nسأعيد الفحص تلقائيًا عند رجوعك ولن أعتبر الإصلاح ناجحًا إلا إذا استطعت التحقق منه.")
+                .setPositiveButton("فتح خيارات المطور", (d, w) -> {
+                    if ("DEV_PROCESS_LIMIT_OVERRIDE".equals(finding.code)) {
+                        ProcessBudgetImportStore.invalidate(this);
+                    }
+                    pendingFindingCode = finding.code;
+                    returningFromRepair = true;
+                    actionView.setText("بانتظار تعديل «" + shortLabel(finding.code) + "» ثم الرجوع للتحقق.");
+                    SettingsNavigator.openDeveloperOptions(this);
+                })
+                .setNeutralButton("تفعيل الوضع المتقدم", (d, w) -> showAdvancedModeDialog())
+                .setNegativeButton("إلغاء", null)
+                .show();
+    }
+
+    private void verifyPendingRepair(SystemSnapshot snapshot, ReadinessEngine.Result result) {
         String code = pendingFindingCode;
         if (code == null) return;
         pendingFindingCode = null;
 
         if (RepairEngine.isResolved(code, snapshot, result)) {
-            actionView.setText("✓ تم تنفيذ إصلاح «" + shortLabel(code) + "» والتحقق من أن المشكلة لم تعد ظاهرة.");
+            actionView.setText("✓ تم التحقق: إصلاح «" + shortLabel(code) + "» نجح ولم تعد المشكلة ظاهرة.");
             return;
         }
 
-        if ("DEV_PROCESS_LIMIT_OVERRIDE".equals(code)
-                && "PROCESS_LIMIT_STANDARD_SELECTED".equals(accessibilityOutcome)
-                && !snapshot.privilegedProcessProbeSuccess) {
-            actionView.setText("✓ تم اختيار Standard limit فعليًا داخل Developer options. "
-                    + "تعذر فقط قراءة القيمة المحمية بعد التغيير؛ فعّل الفحص المتقدم إن أردت إثباتًا رقميًا من ActivityManager.");
+        if ("DEV_PROCESS_LIMIT_OVERRIDE".equals(code) && !snapshot.privilegedProcessProbeSuccess) {
+            actionView.setText("⚠ رجعت من تعديل حد العمليات، لكن Android لم يسمح بقراءة القيمة المحمية مباشرة الآن. لم أسجل الإصلاح كنجاح. استخدم الوضع المتقدم أو استورد Bug Report جديدًا لإثبات القيمة.");
             return;
         }
 
-        if ("TIMEOUT".equals(accessibilityOutcome)) {
-            actionView.setText("✗ لم يكتمل الإصلاح خلال المهلة. لم يعتبر FixHUA أي تغيير ناجحًا.");
-            return;
-        }
-
-        actionView.setText("⚠ تم الرجوع من خطوة الإصلاح لكن الفحص لم يثبت زوال «"
-                + shortLabel(code) + "». لم أسجلها كإصلاح ناجح.");
+        actionView.setText("⚠ الفحص بعد الرجوع لم يثبت زوال «" + shortLabel(code)
+                + "». لم يسجل FixHUA هذه الخطوة كإصلاح ناجح.");
     }
 
-    private void showAccessibilityRequired(String code) {
+    private void showAdvancedModeDialog() {
+        boolean enabled = RepairEngine.hasWriteSecureSettings(this);
+        String state = enabled ? "WRITE_SECURE_SETTINGS مفعلة بالفعل." : "WRITE_SECURE_SETTINGS غير مفعلة.";
         new AlertDialog.Builder(this)
-                .setTitle("مساعد الإصلاح غير مفعل")
-                .setMessage("لإصلاح «" + shortLabel(code) + "» تلقائيًا بدون Root، فعّل خدمة FixHUA مرة واحدة في إمكانية الوصول. الخدمة لا تنقر أي شيء إلا بعد ضغطك على زر الإصلاح داخل FixHUA، ومهمتها محصورة في Developer options.")
-                .setPositiveButton("فتح إمكانية الوصول", (d, w) -> {
-                    returningFromRepair = false;
-                    try {
-                        startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-                    } catch (RuntimeException failure) {
-                        Toast.makeText(this, "تعذر فتح إعدادات إمكانية الوصول", Toast.LENGTH_LONG).show();
-                    }
-                })
-                .setNegativeButton("إلغاء", null)
-                .show();
-    }
-
-    private void showHelperDialog() {
-        boolean enabled = SafeRepairAccessibilityService.isEnabled(this);
-        String state = enabled ? "الخدمة مفعلة الآن." : "الخدمة غير مفعلة الآن.";
-        new AlertDialog.Builder(this)
-                .setTitle("مساعد FixHUA")
+                .setTitle("الوضع المتقدم")
                 .setMessage(state
-                        + "\n\nإمكانية الوصول هي المسار بدون كمبيوتر لإعادة Background process limit إلى Standard limit وإيقاف Don't keep activities.\n\nيوجد أيضًا bootstrap اختياري عبر ADB لتفعيل WRITE_SECURE_SETTINGS وDUMP لإصلاحات مباشرة وقراءة أعمق.")
-                .setPositiveButton("فتح إمكانية الوصول", (d, w) -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
-                .setNeutralButton("نسخ أوامر ADB الاختيارية", (d, w) -> copyBootstrapCommands())
+                        + "\n\nهذا الوضع اختياري ولا يحتاج Root. من ADB نفّذ الأمرين بعد تثبيت النسخة النهائية. بعدها يستطيع FixHUA تنفيذ بعض تغييرات Settings.Global مباشرة وقراءة تشخيص أعمق، ثم التحقق منها.")
+                .setPositiveButton("نسخ أوامر ADB", (d, w) -> copyBootstrapCommands())
+                .setNeutralButton("التشخيص المتقدم", (d, w) -> startActivity(new Intent(this, MainActivity.class)))
                 .setNegativeButton("إغلاق", null)
                 .show();
     }
@@ -334,7 +310,7 @@ public final class OptimizerActivity extends Activity {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText("FixHUA bootstrap", commands));
-            Toast.makeText(this, "تم نسخ أوامر bootstrap", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "تم نسخ أوامر الوضع المتقدم", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -346,8 +322,6 @@ public final class OptimizerActivity extends Activity {
             ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || token != generation.get()) return;
-                lastSnapshot = snapshot;
-                lastResult = result;
                 render(snapshot, result);
                 if (!snapshot.gboxInstalled) {
                     actionView.setText("⛔ GBox غير مثبت.");
@@ -355,8 +329,10 @@ public final class OptimizerActivity extends Activity {
                 }
                 int warnings = result.count(ReadinessEngine.Severity.WARNING);
                 if (warnings == 0) {
-                    SettingsNavigator.launchGBox(this);
-                    actionView.setText("✓ الفحص لم يجد تحذيرًا مهمًا؛ تم إرسال أمر تشغيل GBox.");
+                    boolean launched = SettingsNavigator.launchGBox(this);
+                    actionView.setText(launched
+                            ? "✓ الفحص لم يجد تحذيرًا مهمًا؛ تم تشغيل GBox."
+                            : "✗ تعذر تشغيل GBox من النظام.");
                     return;
                 }
                 ReadinessEngine.Finding best = pickBestFinding(result);
@@ -364,7 +340,7 @@ public final class OptimizerActivity extends Activity {
                         .setTitle("يوجد " + warnings + " تحذير قبل التشغيل")
                         .setMessage(best == null ? "يمكنك تشغيل GBox الآن أو إصلاح التحذيرات أولًا."
                                 : "الأهم الآن: " + best.message)
-                        .setPositiveButton("إصلاح أولًا", (d, w) -> startRepair(snapshot, best))
+                        .setPositiveButton("إصلاح أولًا", (d, w) -> startRepair(best))
                         .setNegativeButton("تشغيل رغم ذلك", (d, w) -> SettingsNavigator.launchGBox(this))
                         .show();
             });
