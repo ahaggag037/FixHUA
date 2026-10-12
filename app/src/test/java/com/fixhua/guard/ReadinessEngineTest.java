@@ -5,6 +5,7 @@ import android.os.PowerManager;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -40,6 +41,26 @@ public class ReadinessEngineTest {
         ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
         assertEquals(ReadinessEngine.Status.ATTENTION, result.status);
         assertTrue(result.count(ReadinessEngine.Severity.WARNING) >= 2);
+    }
+
+    @Test
+    public void validatedHuaweiNetworkDoesNotWarnWhenPresenceProbeWasUnavailable() {
+        SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .network(false, true, true, true)
+                .build();
+        ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
+        assertEquals(ReadinessEngine.Status.READY, result.status);
+        assertFalse(hasCode(result, "NETWORK_UNVALIDATED"));
+    }
+
+    @Test
+    public void trulyUnvalidatedNetworkNeedsAttention() {
+        SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .network(true, true, false, true)
+                .build();
+        ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
+        assertEquals(ReadinessEngine.Status.ATTENTION, result.status);
+        assertTrue(hasCode(result, "NETWORK_UNVALIDATED"));
     }
 
     @Test
@@ -104,13 +125,14 @@ public class ReadinessEngineTest {
     }
 
     @Test
-    public void missingMicrogDoesNotBlockGboxContainerMode() {
+    public void missingHostMicrogIsSilentInGboxContainerMode() {
         SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .gboxInstalled(true)
                 .microgInstalled(false)
                 .build();
         ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
         assertEquals(ReadinessEngine.Status.READY, result.status);
-        assertTrue(hasCode(result, "MICROG_MISSING"));
+        assertFalse(hasCode(result, "MICROG_MISSING"));
     }
 
     private static boolean hasCode(ReadinessEngine.Result result, String code) {
