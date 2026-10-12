@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FixHUA Optimizer</string>
+    <string name="accessibility_service_description">يساعد FixHUA على تنفيذ إصلاحين محددين فقط داخل خيارات المطور: إعادة حد عمليات الخلفية إلى Standard limit وإيقاف Don&apos;t keep activities. لا ينفذ أي نقرات خارج طلب إصلاح بدأه المستخدم.</string>
+</resources>
