@@ -143,12 +143,13 @@ public final class MainActivity extends Activity {
         summary.append("GBox: ").append(s.gboxInstalled ? s.gboxVersion : "غير مثبت").append('\n');
         summary.append("بيئة Huawei: ").append(s.huaweiEnvironment ? "مكتشفة" : "غير مؤكدة").append('\n');
         summary.append("الإنترنت: ").append(s.networkValidated ? "متحقق" : "غير متحقق").append('\n');
-        summary.append("توفير الطاقة: ").append(s.powerSaveMode ? "مفعل" : "متوقف").append('\n');
-        summary.append("RAM متاح: ").append(s.availableRamMb).append(" / ").append(s.totalRamMb).append(" MB").append('\n');
+        summary.append("توفير الطاقة: ").append(s.powerSaveMode ? "مفعّل" : "غير مفعّل").append('\n');
+        summary.append(String.format(Locale.US, "الذاكرة المتاحة: %d MB من %d MB", s.availableRamMb, s.totalRamMb))
+                .append('\n');
         summary.append("المساحة الحرة: ")
                 .append(String.format(Locale.US, "%.0f%%", s.freeStorageFraction() * 100.0))
                 .append('\n');
-        summary.append("الحرارة (حالة النظام): ").append(s.thermalStatus);
+        summary.append("الحالة الحرارية: ").append(formatThermalStatus(s.thermalStatus));
         summaryView.setText(summary.toString());
 
         StringBuilder findings = new StringBuilder();
@@ -169,6 +170,27 @@ public final class MainActivity extends Activity {
         ReadinessEngine.Finding actionable = result.firstActionable();
         fixNextButton.setEnabled(actionable != null);
         fixNextButton.setText(actionable == null ? "لا توجد مشكلة تحتاج إجراء" : "إصلاح أهم مشكلة");
+    }
+
+    private static String formatThermalStatus(int thermalStatus) {
+        switch (thermalStatus) {
+            case 0:
+                return "طبيعية";
+            case 1:
+                return "ارتفاع خفيف";
+            case 2:
+                return "ارتفاع متوسط";
+            case 3:
+                return "مرتفعة";
+            case 4:
+                return "حرجة";
+            case 5:
+                return "طارئة";
+            case 6:
+                return "إيقاف حراري";
+            default:
+                return "غير متاحة";
+        }
     }
 
     private void openArtifactPicker() {
@@ -258,17 +280,13 @@ public final class MainActivity extends Activity {
 
         Intent runtime = new Intent()
                 .setClassName(RUNTIME_PACKAGE, RUNTIME_ACTIVITY)
-                .putExtra(EXTRA_SESSION_ID, session.sessionId())
-                .putExtra(EXTRA_ARTIFACT_SHA256, session.artifactSha256())
-                .putExtra(EXTRA_PLAN_DIGEST, session.planDigest());
+                .putExtra(EXTRA_SESSION_ID, session.sessionId)
+                .putExtra(EXTRA_ARTIFACT_SHA256, session.artifactSha256)
+                .putExtra(EXTRA_PLAN_DIGEST, session.planDigest);
         try {
             startActivity(runtime);
-        } catch (RuntimeException failure) {
-            new AlertDialog.Builder(this)
-                    .setTitle("تعذر تشغيل FixHUA Runtime")
-                    .setMessage(failure.getClass().getSimpleName() + ": " + String.valueOf(failure.getMessage()))
-                    .setPositiveButton("حسنًا", null)
-                    .show();
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "تعذر تشغيل FixHUA Runtime: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -280,404 +298,223 @@ public final class MainActivity extends Activity {
         try {
             startActivityForResult(intent, REQUEST_BUGREPORT_ZIP);
         } catch (RuntimeException e) {
-            intent.setType("*/*");
-            startActivityForResult(intent, REQUEST_BUGREPORT_ZIP);
+            Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("*/*");
+            startActivityForResult(fallback, REQUEST_BUGREPORT_ZIP);
         }
     }
 
     private void analyzeBugreport(Uri uri) {
-        findingsView.setText("جاري تحليل Full Bug Report محليًا…\nلن يتم رفع الملف أو الاحتفاظ بالسجلات الخام.");
+        findingsView.setText("جاري تحليل bugreport محليًا…\nلا يتم رفع التقرير خارج الجهاز.");
         executor.execute(() -> {
-            try (InputStream input = getContentResolver().openInputStream(uri)) {
-                if (input == null) throw new IllegalStateException("تعذر فتح الملف المحدد");
-                BugreportAnalyzer.Result report = new BugreportAnalyzer().analyzeZip(input);
-                HostDoctor doctor = new HostDoctor();
-                int observedProcesses = Math.max(1, report.gboxProcessNames().size());
-                List<HostDoctor.Finding> hostFindings = doctor.evaluate(
-                        report.toHostProfile(),
-                        new HostDoctor.RuntimeBudget("observed-gbox", observedProcesses));
-                HostRemediationPlanner.Plan remediationPlan =
-                        new HostRemediationPlanner().plan(hostFindings);
-
-                HostVerificationSnapshot currentVerificationSnapshot =
-                        HostVerificationSnapshot.from(report, hostFindings);
-                HostVerificationSnapshot previousVerificationSnapshot = loadHostVerificationSnapshot();
-                HostFixVerification.Result verification = previousVerificationSnapshot == null
-                        ? null
-                        : new HostFixVerification().compare(
-                                previousVerificationSnapshot,
-                                currentVerificationSnapshot);
-                saveHostVerificationSnapshots(
-                        previousVerificationSnapshot,
-                        currentVerificationSnapshot);
-
-                String text = formatBugreportResult(report, remediationPlan, verification);
-                HostRemediationPlanner.Step nextStep = remediationPlan.firstActionable();
+            try (InputStream inputStream = getContentResolver().openInputStream(uri)) {
+                if (inputStream == null) throw new IllegalStateException("تعذر فتح الملف");
+                BugreportAnalyzer.Report report = BugreportAnalyzer.analyzeZip(inputStream);
+                HostRemediationPlanner.Plan plan = HostRemediationPlanner.fromBugreport(report);
+                lastHostRemediationStep = plan.firstStep();
+                String text = formatBugreportReport(report, plan);
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
-                    lastHostRemediationStep = nextStep;
                     findingsView.setText(text);
-                    fixNextButton.setEnabled(nextStep != null);
-                    fixNextButton.setText(nextStep == null
-                            ? "لا يوجد إصلاح آمن مباشر من التقرير"
-                            : "إصلاح أهم مشكلة من التقرير");
-
-                    String dialogMessage;
-                    if (verification != null && verification.hasVerifiedImprovement()) {
-                        dialogMessage = "تم التحقق من تغييرات إعدادات فعلية مقارنة بالتقرير السابق. "
-                                + "راجع قسم «التحقق بعد الإصلاح» للتفاصيل.";
-                    } else if (nextStep == null) {
-                        dialogMessage = "تم استخراج حقائق التوافق محليًا فقط. لا يوجد إجراء إعدادات آمن يمكن لـFixHUA اقتراحه مباشرة من هذه النتائج.";
-                    } else {
-                        dialogMessage = "تم إنشاء خطة إصلاح مرتبة حسب الأولوية. الخطوة الأولى: "
-                                + nextStep.recommendedAction()
-                                + " بعد تعديل الإعداد، أنشئ Full Bug Report جديدًا واستورده ليتم التحقق من التغيير.";
-                    }
-
-                    AlertDialog.Builder dialog = new AlertDialog.Builder(this)
-                            .setTitle("تحليل Bug Report اكتمل")
-                            .setMessage(dialogMessage)
-                            .setNegativeButton("إغلاق", null);
-                    if (nextStep != null) {
-                        dialog.setPositiveButton(
-                                "فتح الإعداد المطلوب",
-                                (d, which) -> openHostRemediationStep(nextStep));
-                    } else {
-                        dialog.setPositiveButton("حسنًا", null);
-                    }
-                    dialog.show();
+                    updateFixButtonForHostPlan();
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (isFinishing() || isDestroyed()) return;
                     lastHostRemediationStep = null;
-                    findingsView.setText("تعذر تحليل Bug Report:\n" + e.getClass().getSimpleName()
+                    findingsView.setText("تعذر تحليل bugreport:\n" + e.getClass().getSimpleName()
                             + ": " + String.valueOf(e.getMessage()));
+                    updateFixButtonForHostPlan();
                 });
             }
         });
     }
 
-    private HostVerificationSnapshot loadHostVerificationSnapshot() {
-        return loadHostVerificationSnapshot(HOST_VERIFY_SNAPSHOT);
-    }
-
-    private HostVerificationSnapshot loadPreviousHostVerificationSnapshot() {
-        return loadHostVerificationSnapshot(HOST_VERIFY_PREVIOUS_SNAPSHOT);
-    }
-
-    private HostVerificationSnapshot loadHostVerificationSnapshot(String key) {
-        SharedPreferences prefs = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE);
-        String encoded = prefs.getString(key, null);
-        if (encoded == null || encoded.isBlank()) return null;
-        try {
-            return HostVerificationSnapshot.decode(encoded);
-        } catch (IllegalArgumentException invalid) {
-            prefs.edit().remove(key).apply();
-            return null;
-        }
-    }
-
-    private void saveHostVerificationSnapshots(
-            HostVerificationSnapshot previous,
-            HostVerificationSnapshot current) {
-        SharedPreferences.Editor editor = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE).edit();
-        if (previous == null) {
-            editor.remove(HOST_VERIFY_PREVIOUS_SNAPSHOT);
-        } else {
-            editor.putString(HOST_VERIFY_PREVIOUS_SNAPSHOT, previous.encode());
-        }
-        editor.putString(HOST_VERIFY_SNAPSHOT, current.encode()).apply();
-    }
-
-    private static String formatBugreportResult(
-            BugreportAnalyzer.Result report,
-            HostRemediationPlanner.Plan remediationPlan,
-            HostFixVerification.Result verification) {
+    private String formatBugreportReport(BugreportAnalyzer.Report report, HostRemediationPlanner.Plan plan) {
         StringBuilder text = new StringBuilder();
-        text.append("نتائج Full Bug Report:\n\n");
-
-        if (report.currentMaxCachedProcesses() > 0) {
-            text.append("• حد العمليات الفعلي: ").append(report.currentMaxCachedProcesses()).append('\n');
+        text.append("نتيجة تحليل bugreport:\n\n");
+        text.append("• الملفات التي تم فحصها: ").append(report.scannedEntries).append('\n');
+        text.append("• GBox host processes المرصودة: ").append(report.gboxHostProcessCount).append('\n');
+        if (report.currentMaxCachedProcesses >= 0) {
+            text.append("• CUR_MAX_CACHED_PROCESSES: ").append(report.currentMaxCachedProcesses).append('\n');
         }
-        if (report.customizedMaxCachedProcesses() > 0) {
-            text.append("• حد الجهاز/OEM المرجعي: ")
-                    .append(report.customizedMaxCachedProcesses()).append('\n');
+        if (report.customizedMaxCachedProcesses >= 0) {
+            text.append("• Customized max cached: ").append(report.customizedMaxCachedProcesses).append('\n');
         }
-        text.append("• عمليات GBox المرصودة: ").append(report.gboxProcessNames().size()).append('\n');
-        text.append("• مؤشرات AppProcessKiller: ").append(report.gboxAppProcessKillerMarkers()).append('\n');
-        text.append("• مؤشرات null Application/Resources: ")
-                .append(report.nullApplicationResourcesMarkers()).append('\n');
-        text.append("• Input-dispatch timeout markers: ")
-                .append(report.inputDispatchTimeoutMarkers()).append('\n');
-        text.append("• Force 4x MSAA: ").append(report.force4xMsaa() ? "مفعل" : "غير ظاهر كمفعل").append('\n');
-        text.append("• Don't keep activities: ")
-                .append(report.alwaysFinishActivities() ? "مفعل" : "غير ظاهر كمفعل").append('\n');
-        if (!report.webViewPackage().isBlank()) {
-            text.append("• WebView: ").append(report.webViewPackage());
-            if (!report.webViewVersion().isBlank()) text.append(' ').append(report.webViewVersion());
-            text.append('\n');
+        text.append("• Always finish activities: ").append(report.alwaysFinishActivities ? "مفعل" : "غير ظاهر كمفعل").append('\n');
+        if (report.webViewPackage != null && !report.webViewPackage.isBlank()) {
+            text.append("• WebView package: ").append(report.webViewPackage).append('\n');
         }
-
-        if (!remediationPlan.steps().isEmpty()) {
-            text.append("\nخطة الإصلاح حسب الأولوية:\n");
+        text.append('\n');
+        if (report.findings.isEmpty()) {
+            text.append("لم يجد FixHUA تعارضًا مؤكّدًا في الحقول التي يفهمها هذا الإصدار.\n");
+        } else {
             int index = 1;
-            for (HostRemediationPlanner.Step step : remediationPlan.steps()) {
-                String marker = step.severity() == HostDoctor.Severity.HIGH ? "⛔"
-                        : step.severity() == HostDoctor.Severity.WARNING ? "⚠" : "ℹ";
-                text.append(index++).append(". ").append(marker).append(' ')
-                        .append(step.summary()).append('\n');
-                text.append("  ↳ ").append(step.recommendedAction());
-                if (!step.actionable()) text.append(" [ملاحظة فقط — لا تغيير تلقائي]");
+            for (BugreportAnalyzer.Finding finding : report.findings) {
+                text.append(index++).append(". ").append(finding.message).append('\n');
+            }
+        }
+        if (!plan.steps.isEmpty()) {
+            text.append("\nخطة الإصلاح المحلية:\n");
+            for (HostRemediationPlanner.Step step : plan.steps) {
+                text.append("• P").append(step.priority).append(" — ").append(step.title);
+                if (!step.actionable) text.append(" (مراقبة فقط)");
                 text.append('\n');
             }
         }
-
-        text.append("\nالتحقق بعد الإصلاح:\n");
-        if (verification == null) {
-            text.append("• تم حفظ ملخص مُعقّم لهذه النتيجة كنقطة مقارنة محلية.\n");
-            text.append("• بعد تعديل الإعدادات، أنشئ Full Bug Report جديدًا واستورده للتحقق من التغيير.\n");
-        } else {
-            appendVerification(text, verification);
-        }
-
-        text.append("\nملاحظة: أرقام crash/ANR التاريخية لا تُستخدم لإثبات التحسن بين تقريرين.\n");
-        text.append("تم تحليل ")
-                .append(String.format(Locale.US, "%.1f MB", report.scannedBytes() / (1024.0 * 1024.0)))
-                .append(" من النص الرئيسي دون استخراج ZIP إلى التخزين أو حفظ السجل الخام.");
+        text.append("\nملاحظة: العدادات التاريخية للـcrash/ANR ليست إثباتًا أن الحالة الحالية ما زالت سيئة؛ التحقق الحقيقي يتم بإعادة الالتقاط بعد الإجراء.");
         return text.toString();
     }
 
-    private static void appendVerification(
-            StringBuilder text,
-            HostFixVerification.Result verification) {
-        HostVerificationSnapshot before = verification.before();
-        HostVerificationSnapshot after = verification.after();
-
-        if (verification.processLimitChanged()) {
-            text.append("• حد العمليات: ")
-                    .append(before.currentMaxCachedProcesses())
-                    .append(" → ")
-                    .append(after.currentMaxCachedProcesses());
-            if (verification.processLimitRestoredToOem()) {
-                text.append(" ✓ عاد إلى الحد القياسي/OEM");
-            }
-            text.append('\n');
-        } else {
-            text.append("• حد العمليات لم يتغير: ")
-                    .append(after.currentMaxCachedProcesses()).append('\n');
+    private void updateFixButtonForHostPlan() {
+        HostRemediationPlanner.Step step = lastHostRemediationStep;
+        if (step != null && step.actionable) {
+            fixNextButton.setEnabled(true);
+            fixNextButton.setText("إصلاح أهم مشكلة");
+            return;
         }
-
-        if (verification.force4xMsaaDisabled()) {
-            text.append("• Force 4x MSAA: ON → OFF ✓\n");
-        }
-        if (verification.alwaysFinishActivitiesDisabled()) {
-            text.append("• Don't keep activities: ON → OFF ✓\n");
-        }
-
-        if (!verification.resolvedFindingCodes().isEmpty()) {
-            text.append("• مشاكل لم تعد موجودة: ")
-                    .append(formatFindingCodes(verification.resolvedFindingCodes())).append('\n');
-        }
-        if (!verification.remainingFindingCodes().isEmpty()) {
-            text.append("• مشاكل ما زالت موجودة: ")
-                    .append(formatFindingCodes(verification.remainingFindingCodes())).append('\n');
-        }
-        if (!verification.introducedFindingCodes().isEmpty()) {
-            text.append("• مشاكل جديدة في التقرير الحالي: ")
-                    .append(formatFindingCodes(verification.introducedFindingCodes())).append('\n');
-        }
-        if (!verification.hasVerifiedImprovement() && !verification.hasNewProblem()) {
-            text.append("• لم يظهر تغيير إعدادات قابل للتحقق مقارنة بالتقرير السابق.\n");
-        }
-    }
-
-    private static String formatFindingCodes(List<String> codes) {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < codes.size(); i++) {
-            if (i > 0) out.append("، ");
-            out.append(findingLabel(codes.get(i)));
-        }
-        return out.toString();
-    }
-
-    private static String findingLabel(String code) {
-        switch (code) {
-            case "DEV_PROCESS_LIMIT_OVERRIDE":
-                return "حد العمليات غير القياسي";
-            case "RUNTIME_PROCESS_BUDGET_CONFLICT":
-                return "تعارض ميزانية عمليات GBox";
-            case "ALWAYS_FINISH_ACTIVITIES":
-                return "Don't keep activities";
-            case "FORCE_4X_MSAA":
-                return "Force 4x MSAA";
-            case "WEBVIEW_MISSING":
-                return "WebView غير متاح";
-            case "WEBVIEW_DIRTY":
-                return "WebView يحتاج إعادة تهيئة";
-            case "WEBVIEW_SINGLE_PROCESS":
-                return "WebView أحادي العملية";
-            default:
-                return code;
-        }
-    }
-
-    private void openHostRemediationStep(HostRemediationPlanner.Step step) {
-        suppressNextResumeRefresh = true;
-        SettingsNavigator.fixHostStep(this, step);
+        ReadinessEngine.Result result = lastResult;
+        ReadinessEngine.Finding actionable = result == null ? null : result.firstActionable();
+        fixNextButton.setEnabled(actionable != null);
+        fixNextButton.setText(actionable == null ? "لا توجد مشكلة تحتاج إجراء" : "إصلاح أهم مشكلة");
     }
 
     private void fixMostImportant() {
         HostRemediationPlanner.Step hostStep = lastHostRemediationStep;
-        if (hostStep != null) {
-            openHostRemediationStep(hostStep);
+        if (hostStep != null && hostStep.actionable) {
+            captureHostVerificationBefore();
+            SettingsNavigator.openForFinding(this, hostStep.code);
             return;
         }
 
         ReadinessEngine.Result result = lastResult;
-        if (result == null) {
-            refresh(true);
-            return;
-        }
+        if (result == null) return;
         ReadinessEngine.Finding finding = result.firstActionable();
         if (finding == null) {
-            Toast.makeText(this, "لا توجد مشكلة تحتاج إجراء الآن", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "لا توجد مشكلة قابلة للإصلاح الآن", Toast.LENGTH_SHORT).show();
             return;
         }
-        SettingsNavigator.fixFinding(this, finding);
-    }
 
-    private void launchWithPreflight() {
-        final int generation = refreshGeneration.incrementAndGet();
-        summaryView.setText("جاري الفحص قبل التشغيل…");
-        executor.execute(() -> {
-            SystemSnapshot snapshot = SystemSnapshot.capture(getApplicationContext());
-            ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed() || generation != refreshGeneration.get()) return;
-                lastSnapshot = snapshot;
-                lastResult = result;
-                render(snapshot, result);
-
-                if (!snapshot.gboxInstalled) {
-                    new AlertDialog.Builder(this)
-                            .setTitle("GBox غير مثبت")
-                            .setMessage("لم يعثر FixHUA على حزمة GBox على الجهاز.")
-                            .setPositiveButton("حسنًا", null)
-                            .show();
-                    return;
-                }
-
-                if (result.count(ReadinessEngine.Severity.WARNING) > 0) {
-                    new AlertDialog.Builder(this)
-                            .setTitle("قبل تشغيل GBox")
-                            .setMessage(buildWarningSummary(result))
-                            .setPositiveButton("تشغيل الآن", (d, w) -> launchGBox())
-                            .setNegativeButton("إلغاء", null)
-                            .show();
-                } else {
-                    launchGBox();
-                }
-            });
-        });
-    }
-
-    private String buildWarningSummary(ReadinessEngine.Result result) {
-        StringBuilder text = new StringBuilder("وجد FixHUA نقاطًا قد تؤثر على الاستقرار:\n\n");
-        int shown = 0;
-        for (ReadinessEngine.Finding finding : result.findings) {
-            if (finding.severity != ReadinessEngine.Severity.WARNING) continue;
-            text.append("• ").append(finding.message).append('\n');
-            if (++shown >= 4) break;
+        RepairEngine.RepairResult repair = RepairEngine.repair(this, finding.code);
+        Toast.makeText(this, repair.message, Toast.LENGTH_LONG).show();
+        if (!repair.requiresManualAction) {
+            refresh(false);
         }
-        text.append("\nيمكنك التشغيل الآن أو الرجوع وإصلاحها أولًا.");
-        return text.toString();
     }
 
-    private void launchGBox() {
-        if (!SettingsNavigator.launchGBox(this)) {
-            Toast.makeText(this, "تعذر تشغيل GBox من النظام", Toast.LENGTH_LONG).show();
+    private void captureHostVerificationBefore() {
+        SystemSnapshot snapshot = lastSnapshot;
+        ReadinessEngine.Result result = lastResult;
+        if (snapshot == null) return;
+        HostVerificationSnapshot sanitized = HostVerificationSnapshot.fromLiveSnapshot(snapshot, result);
+        SharedPreferences prefs = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE);
+        String current = prefs.getString(HOST_VERIFY_SNAPSHOT, null);
+        SharedPreferences.Editor editor = prefs.edit();
+        if (current != null && !current.isBlank()) {
+            editor.putString(HOST_VERIFY_PREVIOUS_SNAPSHOT, current);
         }
+        editor.putString(HOST_VERIFY_SNAPSHOT, sanitized.serialize()).apply();
     }
 
     private void showRecoveryCenter() {
-        String[] items = new String[]{
-                "فتح معلومات GBox",
-                "فتح Huawei App launch",
-                "فتح تحسين البطارية",
-                "فتح إعدادات البطارية",
-                "فتح خيارات المطور",
-                "فتح إعدادات التخزين",
-                "فتح إعدادات الشبكة",
-                "تشغيل GBox"
-        };
-        new AlertDialog.Builder(this)
-                .setTitle("مركز إصلاح GBox")
-                .setItems(items, (dialog, which) -> {
-                    switch (which) {
-                        case 0:
-                            SettingsNavigator.openAppDetails(this, SystemSnapshot.GBOX);
-                            break;
-                        case 1:
-                            SettingsNavigator.openHuaweiAppLaunch(this);
-                            break;
-                        case 2:
-                            SettingsNavigator.openBatteryOptimizationSettings(this);
-                            break;
-                        case 3:
-                            SettingsNavigator.openBatterySettings(this);
-                            break;
-                        case 4:
-                            SettingsNavigator.openDeveloperOptions(this);
-                            break;
-                        case 5:
-                            SettingsNavigator.openStorageSettings(this);
-                            break;
-                        case 6:
-                            SettingsNavigator.openWirelessSettings(this);
-                            break;
-                        case 7:
-                            launchGBox();
-                            break;
-                        default:
-                            break;
-                    }
-                })
-                .setNegativeButton("إغلاق", null)
-                .show();
+        startActivity(new Intent(this, OptimizerActivity.class));
+    }
+
+    private void launchWithPreflight() {
+        SystemSnapshot snapshot = lastSnapshot;
+        ReadinessEngine.Result result = lastResult;
+        if (snapshot == null || result == null) {
+            Toast.makeText(this, "يجب فحص الجهاز أولًا", Toast.LENGTH_LONG).show();
+            refresh(true);
+            return;
+        }
+        if (!snapshot.gboxInstalled) {
+            Toast.makeText(this, "GBox غير مثبت", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (result.status == ReadinessEngine.Status.BLOCKED) {
+            new AlertDialog.Builder(this)
+                    .setTitle("FixHUA أوقف التشغيل الوقائي")
+                    .setMessage("يوجد مانع واضح في الفحص الحالي. أصلح المشكلة ذات الأولوية أولًا ثم أعد الفحص.")
+                    .setPositiveButton("حسنًا", null)
+                    .show();
+            return;
+        }
+        Intent launch = getPackageManager().getLaunchIntentForPackage(SystemSnapshot.GBOX);
+        if (launch == null) {
+            Toast.makeText(this, "تعذر العثور على شاشة تشغيل GBox", Toast.LENGTH_LONG).show();
+            return;
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(launch);
     }
 
     private void shareFreshReport() {
-        Toast.makeText(this, "جاري إنشاء التقرير…", Toast.LENGTH_SHORT).show();
-        executor.execute(() -> {
-            SystemSnapshot snapshot = SystemSnapshot.capture(getApplicationContext());
-            ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
-            StringBuilder report = new StringBuilder(ReportBuilder.build(snapshot, result));
+        SystemSnapshot snapshot = lastSnapshot;
+        ReadinessEngine.Result result = lastResult;
+        if (snapshot == null || result == null) {
+            Toast.makeText(this, "شغّل فحص الجهاز أولًا", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String report = buildShareReport(snapshot, result);
+        Intent share = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "FixHUA report")
+                .putExtra(Intent.EXTRA_TEXT, report);
+        startActivity(Intent.createChooser(share, "مشاركة تقرير FixHUA"));
+    }
 
-            HostVerificationSnapshot current = loadHostVerificationSnapshot();
-            if (current != null) {
-                HostVerificationSnapshot previous = loadPreviousHostVerificationSnapshot();
-                HostFixVerification.Result comparison = previous == null
-                        ? null
-                        : new HostFixVerification().compare(previous, current);
-                report.append("\n\n=== SANITIZED BUGREPORT VERIFICATION ===\n")
-                        .append(HostVerificationReport.render(current, comparison));
+    private String buildShareReport(SystemSnapshot snapshot, ReadinessEngine.Result result) {
+        StringBuilder text = new StringBuilder();
+        text.append("FixHUA sanitized report\n");
+        text.append("GBox: ").append(snapshot.gboxInstalled ? snapshot.gboxVersion : "not-installed").append('\n');
+        text.append("Huawei environment: ").append(snapshot.huaweiEnvironment).append('\n');
+        text.append("Network validated: ").append(snapshot.networkValidated).append('\n');
+        text.append("Power save: ").append(snapshot.powerSaveMode).append('\n');
+        text.append("RAM MB: ").append(snapshot.availableRamMb).append('/').append(snapshot.totalRamMb).append('\n');
+        text.append("Storage free ratio: ")
+                .append(String.format(Locale.US, "%.3f", snapshot.freeStorageFraction())).append('\n');
+        text.append("Thermal status: ").append(snapshot.thermalStatus).append('\n');
+        text.append("GBox battery exemption: ").append(snapshot.gboxIgnoringBatteryOptimizations).append('\n');
+        text.append("Controller battery exemption: ").append(snapshot.controllerIgnoringBatteryOptimizations).append('\n');
+        text.append("Imported process-budget probe: ")
+                .append(snapshot.importedProcessBudgetAvailable ? "available" : "none").append('\n');
+        if (snapshot.importedProcessBudgetAvailable) {
+            text.append("Imported process budget current/reference: ")
+                    .append(snapshot.importedProcessBudgetCurrent).append('/')
+                    .append(snapshot.importedProcessBudgetReference).append('\n');
+        }
+        text.append("Privileged process-budget probe: ")
+                .append(snapshot.processBudgetProbeAttempted ? "attempted" : "not-attempted").append('\n');
+        if (snapshot.processBudgetProbeAttempted) {
+            text.append("Privileged probe success: ").append(snapshot.processBudgetProbeSuccess).append('\n');
+            if (!snapshot.processBudgetProbeSuccess) {
+                text.append("Privileged probe failure: ").append(snapshot.processBudgetProbeFailure).append('\n');
             }
+        }
+        text.append("Findings:\n");
+        for (ReadinessEngine.Finding finding : result.findings) {
+            text.append("- ").append(finding.code).append(" [").append(finding.severity).append("]\n");
+        }
+        appendHostVerification(text, snapshot, result);
+        return text.toString();
+    }
 
-            String reportText = report.toString();
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                Intent share = new Intent(Intent.ACTION_SEND)
-                        .setType("text/plain")
-                        .putExtra(Intent.EXTRA_SUBJECT, "FixHUA v2.2 report")
-                        .putExtra(Intent.EXTRA_TEXT, reportText);
-                try {
-                    startActivity(Intent.createChooser(share, "مشاركة تقرير FixHUA"));
-                } catch (RuntimeException e) {
-                    findingsView.setText(reportText);
-                    Toast.makeText(this, "لا يوجد تطبيق مشاركة؛ تم عرض التقرير داخل FixHUA", Toast.LENGTH_LONG).show();
-                }
-            });
-        });
+    private void appendHostVerification(
+            StringBuilder text,
+            SystemSnapshot currentSnapshot,
+            ReadinessEngine.Result currentResult) {
+        SharedPreferences prefs = getSharedPreferences(HOST_VERIFY_PREFS, MODE_PRIVATE);
+        String encoded = prefs.getString(HOST_VERIFY_SNAPSHOT, null);
+        if (encoded == null || encoded.isBlank()) return;
+        try {
+            HostVerificationSnapshot before = HostVerificationSnapshot.deserialize(encoded);
+            HostVerificationSnapshot after = HostVerificationSnapshot.fromLiveSnapshot(currentSnapshot, currentResult);
+            HostFixVerification.Result verification = HostFixVerification.compare(before, after);
+            text.append('\n').append(HostVerificationReport.render(before, after, verification));
+        } catch (RuntimeException ignored) {
+            // Corrupt local verification state must never block the main sanitized report.
+        }
     }
 }
