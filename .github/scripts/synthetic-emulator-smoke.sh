@@ -9,6 +9,7 @@ on_error() {
   for f in dist/controller_uid.txt dist/runtime_uid.txt dist/sample_uid.txt dist/uid-boundary.txt; do
     [[ -f "$f" ]] && { echo "### $f"; cat "$f"; }
   done
+  [[ -f dist/host-probe-logcat.txt ]] && tail -n 320 dist/host-probe-logcat.txt || true
   [[ -f dist/runtime-logcat.txt ]] && tail -n 640 dist/runtime-logcat.txt || true
   [[ -f dist/runtime-lifecycle-logcat.txt ]] && tail -n 640 dist/runtime-lifecycle-logcat.txt || true
   [[ -f dist/runtime-recovery-logcat.txt ]] && tail -n 700 dist/runtime-recovery-logcat.txt || true
@@ -25,7 +26,9 @@ step() { echo "::group::$1"; }
 endstep() { echo "::endgroup::"; }
 
 step "Install three APKs"
-adb install -r dist/FixHUA-Controller.apk
+# -g intentionally grants requested runtime/development permissions to the low-privilege Controller
+# for this bounded emulator acceptance. Runtime remains installed without -g and is audited below.
+adb install -r -g dist/FixHUA-Controller.apk
 adb install -r dist/FixHUA-Runtime.apk
 adb install -r dist/FixHUA-SampleTarget.apk
 endstep
@@ -41,6 +44,19 @@ printf 'controller=%s runtime=%s sample=%s\n' "$controller_uid" "$runtime_uid" "
 [[ -n "$controller_uid" && -n "$runtime_uid" && -n "$sample_uid" ]]
 [[ "$controller_uid" != "$runtime_uid" && "$controller_uid" != "$sample_uid" && "$runtime_uid" != "$sample_uid" ]]
 echo "UID_BOUNDARY_PASS"
+endstep
+
+step "Verify optional P2 DUMP bootstrap and in-app process-budget probe"
+adb shell dumpsys package com.fixhua.guard | tr -d '\r' | tee dist/controller-package-after-grant.txt
+grep -q 'android.permission.DUMP: granted=true' dist/controller-package-after-grant.txt
+adb logcat -c
+adb shell am force-stop com.fixhua.guard || true
+adb shell am start -W -n com.fixhua.guard/.MainActivity
+sleep 5
+adb logcat -d -v brief > dist/host-probe-logcat.txt
+cat dist/host-probe-logcat.txt
+grep -q 'FixHUAHostProbe.*dumpPermission=true probeSuccess=true current=[0-9][0-9]*' dist/host-probe-logcat.txt
+echo "P2_DUMP_PROCESS_BUDGET_PROBE_PASS"
 endstep
 
 step "Import foreign sample and launch Controller-approved Runtime session"
