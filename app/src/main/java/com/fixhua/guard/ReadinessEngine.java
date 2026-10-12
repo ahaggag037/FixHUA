@@ -68,6 +68,19 @@ final class ReadinessEngine {
             ));
         }
 
+        if (s.privilegedProcessProbeSuccess
+                && s.currentMaxCachedProcesses > 0
+                && s.referenceMaxCachedProcesses > 0
+                && s.currentMaxCachedProcesses < s.referenceMaxCachedProcesses) {
+            findings.add(new Finding(
+                    "DEV_PROCESS_LIMIT_OVERRIDE",
+                    Severity.WARNING,
+                    "حد العمليات في الخلفية مضبوط على " + s.currentMaxCachedProcesses
+                            + " بينما مرجع النظام/الجهاز هو " + s.referenceMaxCachedProcesses
+                            + ". هذا يضغط بشدة على GBox متعدد العمليات؛ أعد Background process limit إلى Standard limit."
+            ));
+        }
+
         if (s.alwaysFinishActivities == 1) {
             findings.add(new Finding(
                     "ALWAYS_FINISH_ACTIVITIES",
@@ -129,6 +142,15 @@ final class ReadinessEngine {
                     "WEBVIEW_MISSING",
                     Severity.WARNING,
                     "لم يتم العثور على مزود WebView صالح. بعض صفحات تسجيل الدخول والشاشات المدمجة قد تفشل."
+            ));
+        }
+
+        if (s.dumpPermissionGranted && !s.privilegedProcessProbeSuccess) {
+            findings.add(new Finding(
+                    "PROCESS_BUDGET_PROBE_FAILED",
+                    Severity.INFO,
+                    "صلاحية الفحص المتقدم موجودة، لكن قراءة ميزانية العمليات لم تنجح في هذا الفحص ("
+                            + s.privilegedProcessProbeFailure + "). لم يفترض FixHUA قيمة بديلة."
             ));
         }
 
