@@ -11,6 +11,7 @@ on:
       - 'sample-target/**'
       - 'app/**'
       - 'research/**'
+      - 'tools/**'
       - '.github/scripts/**'
       - '.github/workflows/synthetic-system-ci.yml'
 
@@ -159,6 +160,7 @@ jobs:
             mkdir -p dist
             adb shell dumpsys activity settings | tr -d '\r' > dist/am-settings-shell-baseline.txt
             grep -E 'mOverrideMaxCachedProcesses|mCustomizedMaxCachedProcesses|max_cached_processes|CUR_MAX_CACHED_PROCESSES' dist/am-settings-shell-baseline.txt | tee dist/am-settings-shell-budget-lines.txt || true
+            bash .github/scripts/seed-process-budget-import.sh dist/am-settings-shell-baseline.txt
             bash .github/scripts/synthetic-emulator-smoke.sh
 
       - uses: actions/upload-artifact@v4
@@ -167,6 +169,7 @@ jobs:
           name: FixHUA-Synthetic-System-CI
           path: |
             dist/
+            tools/
             core/build/reports/tests/test/
             app/build/reports/tests/testReleaseUnitTest/
             app/build/reports/lint-results-release.html
