@@ -1,5 +1,6 @@
 package com.fixhua.guard;
 
+import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
@@ -171,6 +172,7 @@ final class SystemSnapshot {
         privilegedProcessProbeFailure = b.privilegedProcessProbeFailure;
     }
 
+    @SuppressLint("NewApi")
     static SystemSnapshot capture(Context context) {
         Context app = context.getApplicationContext();
         PackageManager pm = app.getPackageManager();
