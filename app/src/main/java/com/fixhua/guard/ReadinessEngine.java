@@ -51,24 +51,15 @@ final class ReadinessEngine {
 
     static Result evaluate(SystemSnapshot s) {
         List<Finding> findings = new ArrayList<>();
+        SystemSnapshot.EnvironmentProfile profile = s.environmentProfile();
 
-        if (!s.gboxInstalled) {
-            findings.add(new Finding(
-                    "GBOX_MISSING",
-                    Severity.BLOCKER,
-                    "GBox غير مثبت، لذلك FixHUA لا يستطيع تشغيله أو مراجعة إعداداته."
-            ));
-        }
-
-        // NET_CAPABILITY_VALIDATED is the strongest signal that Android has actually
-        // validated Internet access. Some Huawei builds can make a secondary
-        // ConnectivityManager query fail after capabilities were read successfully;
-        // that must not turn a validated connection into a false warning.
+        // GBox is optional. A Huawei phone with a native Google stack must never be
+        // blocked merely because GBox is absent.
         if (!s.networkInternetCapable || !s.networkValidated) {
             findings.add(new Finding(
                     "NETWORK_UNVALIDATED",
                     Severity.WARNING,
-                    "اتصال الإنترنت غير مُتحقق حاليًا. هذا قد يسبب بطء بدء GMS أو فشل تسجيل الدخول."
+                    "اتصال الإنترنت غير مُتحقق حاليًا، وقد يؤثر ذلك على التطبيقات والخدمات المتصلة."
             ));
         }
 
@@ -81,7 +72,7 @@ final class ReadinessEngine {
                     Severity.WARNING,
                     "حد العمليات في الخلفية مضبوط على " + s.currentMaxCachedProcesses
                             + " بينما مرجع النظام/الجهاز هو " + s.referenceMaxCachedProcesses
-                            + ". هذا يضغط بشدة على GBox متعدد العمليات؛ أعد Background process limit إلى Standard limit."
+                            + ". أعد Background process limit إلى Standard limit لتحسين تعدد المهام."
             ));
         }
 
@@ -89,7 +80,7 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "ALWAYS_FINISH_ACTIVITIES",
                     Severity.WARNING,
-                    "خيار Don't keep activities مفعّل. أندرويد سيغلق الأنشطة بقوة ويمكن أن يسبب خروجًا متكررًا."
+                    "خيار Don't keep activities مفعّل. هذا يقتل الأنشطة بقوة ويضر بثبات التطبيقات وتعدد المهام."
             ));
         }
 
@@ -97,15 +88,15 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "POWER_SAVE",
                     Severity.WARNING,
-                    "وضع توفير الطاقة مفعّل وقد يقيّد عمل GBox وmicroG في الخلفية."
+                    "وضع توفير الطاقة مفعّل وقد يقيّد الأداء والعمل في الخلفية."
             ));
         }
 
-        if (s.gboxInstalled && !s.gboxBatteryExempt) {
+        if (profile == SystemSnapshot.EnvironmentProfile.GBOX_HOST && !s.gboxBatteryExempt) {
             findings.add(new Finding(
                     "GBOX_BATTERY_OPTIMIZED",
                     Severity.WARNING,
-                    "GBox غير موجود في قائمة استثناءات تحسين البطارية."
+                    "GBox مثبت لكنه غير موجود في قائمة استثناءات تحسين البطارية."
             ));
         }
 
@@ -113,7 +104,7 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "MEMORY_PRESSURE",
                     Severity.WARNING,
-                    "الذاكرة المتاحة منخفضة جدًا الآن. لا ينصح بتشغيل بيئة افتراضية ثقيلة قبل تحسن الضغط."
+                    "الذاكرة المتاحة منخفضة جدًا الآن؛ قد يزيد ذلك إعادة تحميل التطبيقات والتقطيع."
             ));
         }
 
@@ -121,15 +112,22 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "LOW_STORAGE",
                     Severity.WARNING,
-                    "المساحة الحرة أقل من 20٪. أجهزة Huawei قد تصبح أقل استقرارًا عندما تقل المساحة الحرة كثيرًا."
+                    "المساحة الحرة أقل من 20٪؛ انخفاض المساحة الحرة كثيرًا قد يضر بالأداء والاستقرار."
             ));
         }
 
-        if (s.thermalStatus >= PowerManager.THERMAL_STATUS_SEVERE) {
+        if (s.thermalStatusSupported && s.thermalStatus >= PowerManager.THERMAL_STATUS_SEVERE) {
             findings.add(new Finding(
                     "THERMAL_PRESSURE",
                     Severity.WARNING,
                     "النظام في ضغط حراري مرتفع؛ الأداء قد ينخفض تلقائيًا حتى يبرد الهاتف."
+            ));
+        } else if (s.batteryTempC >= 45.0f) {
+            findings.add(new Finding(
+                    "BATTERY_HOT",
+                    Severity.WARNING,
+                    "حرارة البطارية مرتفعة (" + String.format(java.util.Locale.US, "%.1f", s.batteryTempC)
+                            + "°C)، وقد يبدأ الجهاز بخفض الأداء حراريًا."
             ));
         }
 
@@ -137,7 +135,7 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "TIME_SETTINGS",
                     Severity.WARNING,
-                    "الوقت أو المنطقة الزمنية التلقائية غير مفعلة؛ ضبط وقت غير صحيح قد يسبب مشاكل تسجيل دخول واتصال مشفر."
+                    "الوقت أو المنطقة الزمنية التلقائية غير مفعلة؛ الوقت الخاطئ قد يسبب مشاكل اتصال وتسجيل دخول."
             ));
         }
 
@@ -145,7 +143,7 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "WEBVIEW_MISSING",
                     Severity.WARNING,
-                    "لم يتم العثور على مزود WebView صالح. بعض صفحات تسجيل الدخول والشاشات المدمجة قد تفشل."
+                    "لم يتم العثور على مزود WebView صالح، وقد تتعطل الشاشات وصفحات تسجيل الدخول المدمجة."
             ));
         }
 
@@ -158,13 +156,12 @@ final class ReadinessEngine {
             ));
         }
 
-        // Host microG is not required for GBox container mode. Do not present its
-        // absence as a finding while GBox is installed; keep it as a raw report fact.
-        if (!s.microgInstalled && !s.gboxInstalled) {
+        boolean partialGoogleStack = s.microgInstalled != s.playStoreInstalled;
+        if (partialGoogleStack) {
             findings.add(new Finding(
-                    "MICROG_MISSING",
+                    "GOOGLE_STACK_PARTIAL",
                     Severity.INFO,
-                    "microG غير ظاهر على الجهاز الحقيقي. هذا يهم فقط أوضاع التثبيت المباشر المدعومة، وليس تشغيل GBox الداخلي."
+                    "تم اكتشاف جزء فقط من حزمة Google (Play services / Play Store). هذا ليس عطلًا مؤكدًا لكنه معلومة تشخيصية مهمة."
             ));
         }
 
@@ -172,7 +169,7 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "DEVICE_IDENTITY_MIXED",
                     Severity.INFO,
-                    "بيئة Huawei موجودة، لكن هوية Build الظاهرة لا تبدو Huawei/Honor. هذا مجرد تنبيه توافق ولا يقوم FixHUA بتغيير هوية الجهاز."
+                    "بيئة Huawei موجودة، لكن هوية Build الظاهرة لا تبدو Huawei/Honor. هذا تنبيه توافق فقط."
             ));
         }
 
@@ -180,7 +177,7 @@ final class ReadinessEngine {
             findings.add(new Finding(
                     "VPN_ACTIVE",
                     Severity.INFO,
-                    "يوجد VPN نشط. هذا ليس خطأ بحد ذاته، لكنه عامل مهم عند تشخيص تسجيل الدخول أو بطء GMS."
+                    "يوجد VPN نشط. هذا ليس خطأ بحد ذاته لكنه عامل مهم في تشخيص الشبكة."
             ));
         }
 
