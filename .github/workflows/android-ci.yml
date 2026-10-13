@@ -1,10 +1,9 @@
-name: FixHUA Android CI
+name: Huawei Legacy Probe CI
 
 on:
   push:
-    branches: [ main, 'build/**', 'release/**', 'rewrite/**' ]
-  pull_request:
-    branches: [ main ]
+    branches: [ 'build/huawei-legacy-probe-v1' ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,7 +23,6 @@ jobs:
       - name: Install Android SDK packages
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
@@ -32,93 +30,91 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Unit tests
-        run: gradle --stacktrace testReleaseUnitTest
+      - name: Lint legacy probe
+        run: gradle --stacktrace :legacyprobe:lintRelease
 
-      - name: Lint release
-        run: gradle --stacktrace lintRelease
+      - name: Build legacy probe
+        run: gradle --stacktrace :legacyprobe:assembleRelease
 
-      - name: Build unsigned release APK
-        run: gradle --stacktrace assembleRelease
-
-      - name: Create temporary release signing key
+      - name: Create temporary signing key
         run: |
           keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/fixhua-v2-release.jks" \
-            -storepass "FixHUA-V2-CI-2026" \
-            -keypass "FixHUA-V2-CI-2026" \
-            -alias fixhua-v2 \
-            -keyalg RSA \
-            -keysize 3072 \
-            -validity 10000 \
-            -dname "CN=FixHUA v2, OU=Personal Android, O=FixHUA, C=EG" \
+            -keystore "$RUNNER_TEMP/legacy-probe.jks" \
+            -storepass "Legacy-Probe-CI-2026" \
+            -keypass "Legacy-Probe-CI-2026" \
+            -alias legacy-probe \
+            -keyalg RSA -keysize 3072 -validity 10000 \
+            -dname "CN=Huawei Legacy Probe, OU=Personal Android, O=Legacy Probe, C=EG" \
             -storetype PKCS12
 
-      - name: Align and sign release APK
+      - name: Align and sign APK
         run: |
-          IN=app/build/outputs/apk/release/app-release-unsigned.apk
-          OUT=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+          mkdir -p legacyprobe/build/outputs/final
+          IN=legacyprobe/build/outputs/apk/release/legacyprobe-release-unsigned.apk
+          OUT=legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk
           test -s "$IN"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f 4 "$IN" "$OUT"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
-            --ks "$RUNNER_TEMP/fixhua-v2-release.jks" \
-            --ks-key-alias fixhua-v2 \
-            --ks-pass pass:FixHUA-V2-CI-2026 \
-            --key-pass pass:FixHUA-V2-CI-2026 \
+            --ks "$RUNNER_TEMP/legacy-probe.jks" \
+            --ks-key-alias legacy-probe \
+            --ks-pass pass:Legacy-Probe-CI-2026 \
+            --key-pass pass:Legacy-Probe-CI-2026 \
             "$OUT"
 
-      - name: Verify APK identity, signature, and permission surface
+      - name: Verify APK
         run: |
-          APK=app/build/outputs/apk/release/FixHUA-v2.0.0.apk
-          test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee app/build/outputs/apk/release/apksigner.txt
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee app/build/outputs/apk/release/apk-badging.txt
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee app/build/outputs/apk/release/apk-permissions.txt
-          grep -q "package: name='com.fixhua.guard' versionCode='20' versionName='2.0.0'" app/build/outputs/apk/release/apk-badging.txt
-          grep -q "android.permission.ACCESS_NETWORK_STATE" app/build/outputs/apk/release/apk-permissions.txt
-          for forbidden in WAKE_LOCK KILL_BACKGROUND_PROCESSES FOREGROUND_SERVICE POST_NOTIFICATIONS PACKAGE_USAGE_STATS REQUEST_IGNORE_BATTERY_OPTIMIZATIONS CHANGE_WIFI_STATE; do
-            if grep -q "android.permission.$forbidden" app/build/outputs/apk/release/apk-permissions.txt; then
-              echo "Forbidden legacy permission present: $forbidden"
+          APK=legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee legacyprobe/build/outputs/final/apksigner.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee legacyprobe/build/outputs/final/apk-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee legacyprobe/build/outputs/final/apk-permissions.txt
+          grep -q "package: name='com.huawei.legacyprobe' versionCode='1' versionName='1.0.0'" legacyprobe/build/outputs/final/apk-badging.txt
+          grep -q "sdkVersion:'23'" legacyprobe/build/outputs/final/apk-badging.txt
+          grep -q "targetSdkVersion:'28'" legacyprobe/build/outputs/final/apk-badging.txt
+          grep -q "android.permission.ACCESS_NETWORK_STATE" legacyprobe/build/outputs/final/apk-permissions.txt
+          grep -q "android.permission.ACCESS_WIFI_STATE" legacyprobe/build/outputs/final/apk-permissions.txt
+          for forbidden in READ_CONTACTS READ_SMS READ_PHONE_STATE ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION MANAGE_EXTERNAL_STORAGE WRITE_SECURE_SETTINGS PACKAGE_USAGE_STATS; do
+            if grep -q "android.permission.$forbidden" legacyprobe/build/outputs/final/apk-permissions.txt; then
+              echo "Forbidden permission present: $forbidden"
               exit 1
             fi
           done
-          sha256sum "$APK" | tee app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
+          sha256sum "$APK" | tee legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk.sha256
 
-      - name: Enable KVM for Android 12 smoke test
+      - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Android 12 install and launch smoke test
+      - name: Android 9 install and launch smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 31
+          api-level: 28
           target: google_apis
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            adb install -r app/build/outputs/apk/release/FixHUA-v2.0.0.apk
+            APK=legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk
+            adb install -r "$APK"
             adb logcat -c
-            adb shell am force-stop com.fixhua.guard
-            adb shell am start -W -n com.fixhua.guard/.MainActivity | tee app/build/outputs/apk/release/smoke-start.txt
-            sleep 4
-            adb shell pidof com.fixhua.guard | grep -Eq '[0-9]+'
-            adb shell dumpsys activity activities | grep -F "com.fixhua.guard/.MainActivity"
-            test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.fixhua.guard' || true)"
+            adb shell am force-stop com.huawei.legacyprobe
+            adb shell am start -W -n com.huawei.legacyprobe/.MainActivity | tee legacyprobe/build/outputs/final/smoke-start.txt
+            sleep 5
+            adb shell pidof com.huawei.legacyprobe | grep -Eq '[0-9]+'
+            adb shell dumpsys activity activities | grep -F "com.huawei.legacyprobe/.MainActivity"
+            test -z "$(adb logcat -d -s AndroidRuntime:E | grep -F 'Process: com.huawei.legacyprobe' || true)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FixHUA-v2.0.0-release
+          name: Huawei-Legacy-Probe-v1.0.0
           path: |
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk
-            app/build/outputs/apk/release/FixHUA-v2.0.0.apk.sha256
-            app/build/outputs/apk/release/apksigner.txt
-            app/build/outputs/apk/release/apk-badging.txt
-            app/build/outputs/apk/release/apk-permissions.txt
-            app/build/outputs/apk/release/smoke-start.txt
-            app/build/reports/tests/testReleaseUnitTest/
-            app/build/reports/lint-results-release.html
+            legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk
+            legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk.sha256
+            legacyprobe/build/outputs/final/apksigner.txt
+            legacyprobe/build/outputs/final/apk-badging.txt
+            legacyprobe/build/outputs/final/apk-permissions.txt
+            legacyprobe/build/outputs/final/smoke-start.txt
+            legacyprobe/build/reports/lint-results-release.html
           if-no-files-found: error
