@@ -10,8 +10,8 @@ android {
         applicationId = "com.fixhua.guard"
         minSdk = 28
         targetSdk = 35
-        versionCode = 23
-        versionName = "2.1.2"
+        versionCode = 24
+        versionName = "2.2.0"
     }
 
     buildTypes {
