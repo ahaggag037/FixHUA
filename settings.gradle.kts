@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "FixHUA"
+rootProject.name = "INESystemProbe"
 include(":app")

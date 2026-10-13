@@ -1,1 +1,1 @@
-# FixHUA v0.1 has no custom shrinker rules.
+# Intentionally empty for v0.1.0. Release minification is disabled.

@@ -3,15 +3,15 @@ plugins {
 }
 
 android {
-    namespace = "com.fixhua.guard"
+    namespace = "com.haggag.inesystemprobe"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.fixhua.guard"
-        minSdk = 29
-        targetSdk = 35
-        versionCode = 20
-        versionName = "2.0.0"
+        applicationId = "com.haggag.inesystemprobe"
+        minSdk = 28
+        targetSdk = 28
+        versionCode = 1
+        versionName = "0.1.0"
     }
 
     buildTypes {
@@ -24,6 +24,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
     }
 
     testOptions {

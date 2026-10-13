@@ -1,11 +1,18 @@
-# FixHUA
+# INE System Probe
 
-Lightweight, privacy-first Huawei / GBox / microG diagnostics for Android.
+Independent diagnostic APK for the second Huawei phone (INE-LX1r / Android 9 family).
 
-## Goal
-Collect reproducible device, runtime, power, memory, thermal, network, WebView, GBox and microG compatibility signals and export a local report for analysis.
+This branch is intentionally isolated from FixHUA logic. It does not contain GBox readiness rules, microG assumptions, or optimizer verdicts. The first-stage APK only collects raw, privacy-safe system measurements so optimization decisions can be made from evidence from this device.
 
 ## Privacy
-- No accounts, messages, photos, contacts, location, or personal files are collected.
-- No report is uploaded automatically.
-- The app is diagnostic-only in v0.1 and does not modify system settings.
+
+The probe does not collect accounts, contacts, messages, photos, location, Android ID, serial number, or IP address.
+
+## Build target
+
+- applicationId: `com.haggag.inesystemprobe`
+- minSdk: 28 (Android 9)
+- targetSdk: 28
+- compileSdk: 35
+
+CI builds, lints, and runs an install/launch smoke test on an Android 9 / API 28 emulator before publishing the APK artifact.
