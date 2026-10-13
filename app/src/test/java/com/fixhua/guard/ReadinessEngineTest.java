@@ -21,19 +21,22 @@ public class ReadinessEngineTest {
     }
 
     @Test
-    public void missingGboxBlocksLaunchReadiness() {
+    public void nativeGoogleHuaweiDoesNotRequireGbox() {
         SystemSnapshot snapshot = new SystemSnapshot.Builder()
                 .gboxInstalled(false)
+                .microgInstalled(true)
+                .playStoreInstalled(true)
+                .huaweiEnvironment(true)
                 .build();
         ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
-        assertEquals(ReadinessEngine.Status.BLOCKED, result.status);
-        assertEquals(1, result.count(ReadinessEngine.Severity.BLOCKER));
-        assertNotNull(result.firstActionable());
-        assertEquals("GBOX_MISSING", result.firstActionable().code);
+        assertEquals(SystemSnapshot.EnvironmentProfile.HUAWEI_NATIVE_GMS, snapshot.environmentProfile());
+        assertEquals(ReadinessEngine.Status.READY, result.status);
+        assertEquals(0, result.count(ReadinessEngine.Severity.BLOCKER));
+        assertFalse(hasCode(result, "GBOX_MISSING"));
     }
 
     @Test
-    public void powerAndBatteryRestrictionsNeedAttention() {
+    public void powerAndBatteryRestrictionsNeedAttentionInGboxMode() {
         SystemSnapshot snapshot = new SystemSnapshot.Builder()
                 .powerSaveMode(true)
                 .gboxBatteryExempt(false)
@@ -104,13 +107,38 @@ public class ReadinessEngineTest {
     }
 
     @Test
-    public void thermalPressureNeedsAttention() {
+    public void thermalPressureNeedsAttentionWhenApiSupportsThermalStatus() {
         SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .thermalStatusSupported(true)
                 .thermalStatus(PowerManager.THERMAL_STATUS_SEVERE)
                 .build();
         ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
         assertEquals(ReadinessEngine.Status.ATTENTION, result.status);
         assertTrue(hasCode(result, "THERMAL_PRESSURE"));
+    }
+
+    @Test
+    public void android9DoesNotTreatMissingThermalApiAsNoHeatSignal() {
+        SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .thermalStatusSupported(false)
+                .thermalStatus(PowerManager.THERMAL_STATUS_NONE)
+                .batteryTempC(37.0f)
+                .build();
+        ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
+        assertEquals(ReadinessEngine.Status.READY, result.status);
+        assertFalse(hasCode(result, "THERMAL_PRESSURE"));
+        assertFalse(hasCode(result, "BATTERY_HOT"));
+    }
+
+    @Test
+    public void hotBatteryIsWarningWhenThermalApiUnavailable() {
+        SystemSnapshot snapshot = new SystemSnapshot.Builder()
+                .thermalStatusSupported(false)
+                .batteryTempC(46.0f)
+                .build();
+        ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
+        assertEquals(ReadinessEngine.Status.ATTENTION, result.status);
+        assertTrue(hasCode(result, "BATTERY_HOT"));
     }
 
     @Test
@@ -125,14 +153,15 @@ public class ReadinessEngineTest {
     }
 
     @Test
-    public void missingHostMicrogIsSilentInGboxContainerMode() {
+    public void partialGoogleStackIsInformationalOnly() {
         SystemSnapshot snapshot = new SystemSnapshot.Builder()
-                .gboxInstalled(true)
-                .microgInstalled(false)
+                .gboxInstalled(false)
+                .microgInstalled(true)
+                .playStoreInstalled(false)
                 .build();
         ReadinessEngine.Result result = ReadinessEngine.evaluate(snapshot);
         assertEquals(ReadinessEngine.Status.READY, result.status);
-        assertFalse(hasCode(result, "MICROG_MISSING"));
+        assertTrue(hasCode(result, "GOOGLE_STACK_PARTIAL"));
     }
 
     private static boolean hasCode(ReadinessEngine.Result result, String code) {
