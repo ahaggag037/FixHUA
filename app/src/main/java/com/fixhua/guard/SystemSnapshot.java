@@ -15,6 +15,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.PowerManager;
 import android.os.StatFs;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.webkit.WebView;
 
@@ -22,15 +23,28 @@ import java.util.Locale;
 
 final class SystemSnapshot {
     static final String GBOX = "com.gbox.android";
-    static final String MICROG = "com.google.android.gms";
+    // com.google.android.gms is the Google Play services package name. A compatible
+    // microG implementation can use the same package id, so package presence alone
+    // must never be labelled as cryptographic proof of the implementation vendor.
+    static final String GOOGLE_PLAY_SERVICES = "com.google.android.gms";
     static final String PLAY_STORE = "com.android.vending";
     static final String HUAWEI_SYSTEM_MANAGER = "com.huawei.systemmanager";
     static final String HMS_CORE = "com.huawei.hwid";
     static final String APP_GALLERY = "com.huawei.appmarket";
 
+    enum EnvironmentProfile {
+        GBOX_HOST,
+        HUAWEI_NATIVE_GMS,
+        HUAWEI_HMS_ONLY,
+        GENERIC_NATIVE_GMS,
+        GENERIC_ANDROID
+    }
+
     final boolean gboxInstalled;
     final String gboxVersion;
     final String gboxInstaller;
+    // Kept as field names for source compatibility with the existing controller code.
+    // They now mean the com.google.android.gms package, not a claim that microG is used.
     final boolean microgInstalled;
     final String microgVersion;
     final boolean playStoreInstalled;
@@ -52,15 +66,24 @@ final class SystemSnapshot {
     final boolean microgBatteryExempt;
     final boolean powerSaveMode;
     final boolean deviceIdleMode;
+    final boolean thermalStatusSupported;
     final int thermalStatus;
     final int batteryPercent;
     final float batteryTempC;
+    final int batteryStatus;
+    final int batteryPlugged;
+    final int batteryVoltageMv;
 
     final long totalRamMb;
     final long availableRamMb;
     final boolean lowMemory;
+    final boolean lowRamDevice;
+    final int memoryClassMb;
+    final int largeMemoryClassMb;
     final long totalStorageMb;
     final long freeStorageMb;
+    final int cpuCoreCount;
+    final long uptimeMinutes;
 
     final boolean networkPresent;
     final boolean networkInternetCapable;
@@ -75,6 +98,9 @@ final class SystemSnapshot {
     final int alwaysFinishActivities;
     final int autoTime;
     final int autoTimeZone;
+    final float windowAnimationScale;
+    final float transitionAnimationScale;
+    final float animatorDurationScale;
 
     final boolean dumpPermissionGranted;
     final boolean privilegedProcessProbeSuccess;
@@ -106,14 +132,23 @@ final class SystemSnapshot {
         microgBatteryExempt = b.microgBatteryExempt;
         powerSaveMode = b.powerSaveMode;
         deviceIdleMode = b.deviceIdleMode;
+        thermalStatusSupported = b.thermalStatusSupported;
         thermalStatus = b.thermalStatus;
         batteryPercent = b.batteryPercent;
         batteryTempC = b.batteryTempC;
+        batteryStatus = b.batteryStatus;
+        batteryPlugged = b.batteryPlugged;
+        batteryVoltageMv = b.batteryVoltageMv;
         totalRamMb = b.totalRamMb;
         availableRamMb = b.availableRamMb;
         lowMemory = b.lowMemory;
+        lowRamDevice = b.lowRamDevice;
+        memoryClassMb = b.memoryClassMb;
+        largeMemoryClassMb = b.largeMemoryClassMb;
         totalStorageMb = b.totalStorageMb;
         freeStorageMb = b.freeStorageMb;
+        cpuCoreCount = b.cpuCoreCount;
+        uptimeMinutes = b.uptimeMinutes;
         networkPresent = b.networkPresent;
         networkInternetCapable = b.networkInternetCapable;
         networkValidated = b.networkValidated;
@@ -125,6 +160,9 @@ final class SystemSnapshot {
         alwaysFinishActivities = b.alwaysFinishActivities;
         autoTime = b.autoTime;
         autoTimeZone = b.autoTimeZone;
+        windowAnimationScale = b.windowAnimationScale;
+        transitionAnimationScale = b.transitionAnimationScale;
+        animatorDurationScale = b.animatorDurationScale;
         dumpPermissionGranted = b.dumpPermissionGranted;
         privilegedProcessProbeSuccess = b.privilegedProcessProbeSuccess;
         currentMaxCachedProcesses = b.currentMaxCachedProcesses;
@@ -144,15 +182,17 @@ final class SystemSnapshot {
         b.buildDisplay = safe(Build.DISPLAY);
         b.androidRelease = safe(Build.VERSION.RELEASE);
         b.sdk = Build.VERSION.SDK_INT;
+        b.cpuCoreCount = Math.max(1, Runtime.getRuntime().availableProcessors());
+        b.uptimeMinutes = Math.max(0L, SystemClock.elapsedRealtime() / 60_000L);
 
         PackageInfo gbox = packageInfo(pm, GBOX);
         b.gboxInstalled = gbox != null;
         b.gboxVersion = versionName(gbox);
         b.gboxInstaller = gbox == null ? "not-installed" : installer(pm, GBOX);
 
-        PackageInfo microg = packageInfo(pm, MICROG);
-        b.microgInstalled = microg != null;
-        b.microgVersion = versionName(microg);
+        PackageInfo googlePlayServices = packageInfo(pm, GOOGLE_PLAY_SERVICES);
+        b.microgInstalled = googlePlayServices != null;
+        b.microgVersion = versionName(googlePlayServices);
 
         PackageInfo play = packageInfo(pm, PLAY_STORE);
         b.playStoreInstalled = play != null;
@@ -173,15 +213,17 @@ final class SystemSnapshot {
         if (power != null) {
             b.powerSaveMode = power.isPowerSaveMode();
             b.deviceIdleMode = power.isDeviceIdleMode();
-            if (Build.VERSION.SDK_INT >= 29) {
+            b.thermalStatusSupported = Build.VERSION.SDK_INT >= 29;
+            if (b.thermalStatusSupported) {
                 try {
                     b.thermalStatus = power.getCurrentThermalStatus();
                 } catch (RuntimeException ignored) {
+                    b.thermalStatusSupported = false;
                     b.thermalStatus = PowerManager.THERMAL_STATUS_NONE;
                 }
             }
             b.gboxBatteryExempt = b.gboxInstalled && batteryExempt(power, GBOX);
-            b.microgBatteryExempt = b.microgInstalled && batteryExempt(power, MICROG);
+            b.microgBatteryExempt = b.microgInstalled && batteryExempt(power, GOOGLE_PLAY_SERVICES);
         }
 
         ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
@@ -191,6 +233,9 @@ final class SystemSnapshot {
             b.totalRamMb = bytesToMb(info.totalMem);
             b.availableRamMb = bytesToMb(info.availMem);
             b.lowMemory = info.lowMemory;
+            b.lowRamDevice = am.isLowRamDevice();
+            b.memoryClassMb = am.getMemoryClass();
+            b.largeMemoryClassMb = am.getLargeMemoryClass();
         }
 
         try {
@@ -221,9 +266,6 @@ final class SystemSnapshot {
                 b.networkWifi = false;
                 b.networkVpn = false;
             }
-            // Huawei builds can throw from this secondary query even after active
-            // network capabilities were read successfully. Keep metered state
-            // independent so it cannot corrupt the validated-network result.
             try {
                 b.networkMetered = cm.isActiveNetworkMetered();
             } catch (RuntimeException ignored) {
@@ -245,6 +287,9 @@ final class SystemSnapshot {
         b.alwaysFinishActivities = readGlobalInt(app, Settings.Global.ALWAYS_FINISH_ACTIVITIES);
         b.autoTime = readGlobalInt(app, Settings.Global.AUTO_TIME);
         b.autoTimeZone = readGlobalInt(app, Settings.Global.AUTO_TIME_ZONE);
+        b.windowAnimationScale = readGlobalFloat(app, Settings.Global.WINDOW_ANIMATION_SCALE);
+        b.transitionAnimationScale = readGlobalFloat(app, Settings.Global.TRANSITION_ANIMATION_SCALE);
+        b.animatorDurationScale = readGlobalFloat(app, Settings.Global.ANIMATOR_DURATION_SCALE);
 
         PrivilegedHostProbe.Result privilegedProbe = PrivilegedHostProbe.capture(app);
         b.dumpPermissionGranted = privilegedProbe.dumpPermissionGranted();
@@ -265,9 +310,34 @@ final class SystemSnapshot {
             if (tenths != Integer.MIN_VALUE) {
                 b.batteryTempC = tenths / 10f;
             }
+            b.batteryStatus = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            b.batteryPlugged = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0);
+            b.batteryVoltageMv = battery.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1);
         }
 
         return b.build();
+    }
+
+    EnvironmentProfile environmentProfile() {
+        if (gboxInstalled) return EnvironmentProfile.GBOX_HOST;
+        if (microgInstalled && playStoreInstalled) {
+            return huaweiEnvironment
+                    ? EnvironmentProfile.HUAWEI_NATIVE_GMS
+                    : EnvironmentProfile.GENERIC_NATIVE_GMS;
+        }
+        if (huaweiEnvironment) return EnvironmentProfile.HUAWEI_HMS_ONLY;
+        return EnvironmentProfile.GENERIC_ANDROID;
+    }
+
+    boolean nativeGoogleStackDetected() {
+        EnvironmentProfile profile = environmentProfile();
+        return profile == EnvironmentProfile.HUAWEI_NATIVE_GMS
+                || profile == EnvironmentProfile.GENERIC_NATIVE_GMS;
+    }
+
+    boolean batteryCharging() {
+        return batteryStatus == BatteryManager.BATTERY_STATUS_CHARGING
+                || batteryStatus == BatteryManager.BATTERY_STATUS_FULL;
     }
 
     double freeStorageFraction() {
@@ -291,6 +361,14 @@ final class SystemSnapshot {
             return Settings.Global.getInt(context.getContentResolver(), key);
         } catch (Settings.SettingNotFoundException | SecurityException ignored) {
             return -1;
+        }
+    }
+
+    private static float readGlobalFloat(Context context, String key) {
+        try {
+            return Settings.Global.getFloat(context.getContentResolver(), key);
+        } catch (Settings.SettingNotFoundException | SecurityException ignored) {
+            return -1f;
         }
     }
 
@@ -360,25 +438,37 @@ final class SystemSnapshot {
         boolean microgBatteryExempt = true;
         boolean powerSaveMode = false;
         boolean deviceIdleMode = false;
+        boolean thermalStatusSupported = true;
         int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
         int batteryPercent = 50;
         float batteryTempC = 30f;
+        int batteryStatus = BatteryManager.BATTERY_STATUS_DISCHARGING;
+        int batteryPlugged = 0;
+        int batteryVoltageMv = 4000;
         long totalRamMb = 8192;
         long availableRamMb = 4096;
         boolean lowMemory = false;
+        boolean lowRamDevice = false;
+        int memoryClassMb = 256;
+        int largeMemoryClassMb = 512;
         long totalStorageMb = 128000;
         long freeStorageMb = 64000;
+        int cpuCoreCount = 8;
+        long uptimeMinutes = 120;
         boolean networkPresent = true;
         boolean networkInternetCapable = true;
         boolean networkValidated = true;
         boolean networkWifi = true;
         boolean networkVpn = false;
         boolean networkMetered = false;
-        String webViewPackage = "com.huawei.webview";
+        String webViewPackage = "com.android.chrome";
         String webViewVersion = "test";
         int alwaysFinishActivities = 0;
         int autoTime = 1;
         int autoTimeZone = 1;
+        float windowAnimationScale = 1f;
+        float transitionAnimationScale = 1f;
+        float animatorDurationScale = 1f;
         boolean dumpPermissionGranted = false;
         boolean privilegedProcessProbeSuccess = false;
         int currentMaxCachedProcesses = -1;
@@ -387,6 +477,7 @@ final class SystemSnapshot {
         String privilegedProcessProbeFailure = "DUMP_NOT_GRANTED";
 
         Builder gboxInstalled(boolean value) { gboxInstalled = value; return this; }
+        Builder playStoreInstalled(boolean value) { playStoreInstalled = value; return this; }
         Builder networkValidated(boolean value) { networkValidated = value; return this; }
         Builder network(boolean present, boolean internetCapable, boolean validated, boolean wifi) {
             networkPresent = present;
@@ -401,6 +492,8 @@ final class SystemSnapshot {
         Builder ram(long total, long available) { totalRamMb = total; availableRamMb = available; return this; }
         Builder storage(long total, long free) { totalStorageMb = total; freeStorageMb = free; return this; }
         Builder thermalStatus(int value) { thermalStatus = value; return this; }
+        Builder thermalStatusSupported(boolean value) { thermalStatusSupported = value; return this; }
+        Builder batteryTempC(float value) { batteryTempC = value; return this; }
         Builder alwaysFinishActivities(int value) { alwaysFinishActivities = value; return this; }
         Builder autoTime(int value) { autoTime = value; return this; }
         Builder autoTimeZone(int value) { autoTimeZone = value; return this; }
