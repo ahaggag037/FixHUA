@@ -8,10 +8,10 @@ android {
 
     defaultConfig {
         applicationId = "com.fixhua.guard"
-        minSdk = 29
+        minSdk = 28
         targetSdk = 35
-        versionCode = 22
-        versionName = "2.1.1"
+        versionCode = 23
+        versionName = "2.1.2"
     }
 
     buildTypes {
