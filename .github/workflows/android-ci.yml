@@ -96,8 +96,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            APK=legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk
-            adb install -r "$APK"
+            adb install -r legacyprobe/build/outputs/final/Huawei-Legacy-Probe-v1.0.0.apk
             adb logcat -c
             adb shell am force-stop com.huawei.legacyprobe
             adb shell am start -W -n com.huawei.legacyprobe/.MainActivity | tee legacyprobe/build/outputs/final/smoke-start.txt
